@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/contracts/annotation-attachment.schema.json",
+  "title": "Godot Codex Bridge AI Marker Annotation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "annotation_version",
+    "annotation_id",
+    "annotation_role",
+    "non_game_overlay",
+    "do_not_recreate_marker_graphics",
+    "instruction",
+    "captured_at",
+    "capture_scope",
+    "image_size",
+    "artifacts",
+    "markers",
+    "privacy"
+  ],
+  "properties": {
+    "annotation_version": {
+      "const": "godot-codex-bridge/annotation-v1"
+    },
+    "annotation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "annotation_role": {
+      "const": "user_reference_marker"
+    },
+    "non_game_overlay": {
+      "const": true
+    },
+    "do_not_recreate_marker_graphics": {
+      "const": true
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "capture_scope": {
+      "type": "string",
+      "enum": [
+        "editor_window",
+        "viewport_3d",
+        "viewport_2d"
+      ]
+    },
+    "fallback_reason": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "current_scene": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512
+    },
+    "active_screen": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "selected_nodes": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "image_size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        }
+      }
+    },
+    "window_rect": {
+      "$ref": "#/$defs/rect"
+    },
+    "screen_rect": {
+      "$ref": "#/$defs/rect"
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_png",
+        "annotated_png",
+        "manifest_json"
+      ],
+      "properties": {
+        "raw_png": {
+          "$ref": "#/$defs/artifact_path"
+        },
+        "annotated_png": {
+          "$ref": "#/$defs/artifact_path"
+        },
+        "manifest_json": {
+          "$ref": "#/$defs/artifact_path"
+        }
+      }
+    },
+    "markers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/marker"
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "external_upload_allowed"
+      ],
+      "properties": {
+        "classification": {
+          "const": "local_sensitive_evidence"
+        },
+        "external_upload_allowed": {
+          "const": false
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "artifact_path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_path",
+        "project_relative_path"
+      ],
+      "properties": {
+        "local_path": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "project_relative_path": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^\\.godot/godot_codex_bridge/artifacts/annotations/[A-Za-z0-9_.-]+/(raw|annotated|annotation)\\.(png|json)$"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "png",
+            "json"
+          ]
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "marker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "color",
+        "pixel_bounds",
+        "normalized_bounds"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4,
+          "pattern": "^[A-Z][0-9]?$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "pin",
+            "rectangle",
+            "arrow",
+            "freehand",
+            "text"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "pixel_bounds": {
+          "$ref": "#/$defs/rect"
+        },
+        "normalized_bounds": {
+          "$ref": "#/$defs/normalized_rect"
+        },
+        "points": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/point"
+          }
+        }
+      }
+    },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number" },
+        "h": { "type": "number" }
+      }
+    },
+    "normalized_rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "w": { "type": "number", "minimum": 0, "maximum": 1 },
+        "h": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    }
+  }
+}

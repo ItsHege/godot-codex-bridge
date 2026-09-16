@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/contracts/runtime-state.schema.json",
+  "title": "Godot Codex Bridge Runtime State v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "runtime_state_version",
+    "generated_at",
+    "project",
+    "tree",
+    "metrics"
+  ],
+  "properties": {
+    "runtime_state_version": {
+      "const": "godot-codex-bridge/runtime-state-v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "maxLength": 200 },
+        "main_scene": { "type": "string", "maxLength": 512 }
+      }
+    },
+    "tree": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["nodes", "node_count_sampled", "truncated"],
+      "properties": {
+        "current_scene": { "type": "string", "maxLength": 512 },
+        "active_scene": { "$ref": "#/$defs/activeScene" },
+        "root": { "type": "string", "maxLength": 512 },
+        "paused": { "type": "boolean" },
+        "node_count_sampled": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "node_type_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 1000 }
+        },
+        "truncated": { "type": "boolean" },
+        "max_nodes": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "max_depth": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "key_positions": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/keyPosition" }
+        },
+        "nodes": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/node" }
+        },
+        "summary": { "$ref": "#/$defs/treeSummary" }
+      }
+    },
+    "autoloads": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "sampled": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/autoload" }
+        },
+        "truncated": { "type": "boolean" },
+        "max_autoloads": { "type": "integer", "minimum": 1, "maximum": 200 }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["number", "integer", "null"]
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "paused": { "type": "boolean" },
+        "time_scale": { "type": "number" },
+        "physics_ticks_per_second": { "type": "integer", "minimum": 1 },
+        "max_fps": { "type": "integer", "minimum": 0 },
+        "process_frames": { "type": "integer", "minimum": 0 },
+        "physics_frames": { "type": "integer", "minimum": 0 },
+        "frames_drawn": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "total_actions": { "type": "integer", "minimum": 0 },
+        "sampled_actions": {
+          "type": "array",
+          "maxItems": 120,
+          "items": { "type": "string", "maxLength": 120 }
+        },
+        "action_states": {
+          "type": "array",
+          "maxItems": 120,
+          "items": { "$ref": "#/$defs/actionState" }
+        },
+        "active_actions": {
+          "type": "array",
+          "maxItems": 120,
+          "items": { "type": "string", "maxLength": 120 }
+        },
+        "truncated": { "type": "boolean" },
+        "max_actions": { "type": "integer", "minimum": 1, "maximum": 500 }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "classification": { "const": "local_sensitive_runtime_evidence" },
+        "external_upload_allowed": { "const": false }
+      }
+    }
+  },
+  "$defs": {
+    "treeSummary": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "active_scene_name": { "type": "string", "maxLength": 200 },
+        "active_scene_type": { "type": "string", "maxLength": 120 },
+        "active_scene_path": { "type": "string", "maxLength": 512 },
+        "current_scene": { "type": "string", "maxLength": 512 },
+        "node_count_sampled": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "top_node_types": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "type": { "type": "string", "maxLength": 120 },
+              "count": { "type": "integer", "minimum": 0, "maximum": 1000 }
+            }
+          }
+        },
+        "key_position_count": { "type": "integer", "minimum": 0, "maximum": 200 },
+        "autoload_count": { "type": "integer", "minimum": 0, "maximum": 200 },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "actionState": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "pressed", "strength"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 120 },
+        "pressed": { "type": "boolean" },
+        "strength": { "type": "number", "minimum": 0 }
+      }
+    },
+    "activeScene": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string", "maxLength": 512 },
+        "name": { "type": "string", "maxLength": 200 },
+        "type": { "type": "string", "maxLength": 120 },
+        "scene_file_path": { "type": "string", "maxLength": 512 },
+        "script_path": { "type": "string", "maxLength": 512 },
+        "child_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "keyPosition": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["path", "name", "type", "dimension"],
+      "properties": {
+        "path": { "type": "string", "maxLength": 512 },
+        "name": { "type": "string", "maxLength": 200 },
+        "type": { "type": "string", "maxLength": 120 },
+        "dimension": { "enum": ["2d", "3d"] },
+        "position": { "type": "object", "additionalProperties": { "type": ["number", "integer", "null"] } },
+        "global_position": { "type": "object", "additionalProperties": { "type": ["number", "integer", "null"] } }
+      }
+    },
+    "autoload": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "resource_path", "singleton", "present_in_tree"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 200 },
+        "resource_path": { "type": "string", "maxLength": 512 },
+        "singleton": { "type": "boolean" },
+        "node_path": { "type": "string", "maxLength": 512 },
+        "present_in_tree": { "type": "boolean" },
+        "type": { "type": "string", "maxLength": 120 },
+        "script_path": { "type": "string", "maxLength": 512 },
+        "scene_file_path": { "type": "string", "maxLength": 512 }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["path", "name", "type", "depth", "child_count"],
+      "properties": {
+        "path": { "type": "string", "maxLength": 512 },
+        "name": { "type": "string", "maxLength": 200 },
+        "type": { "type": "string", "maxLength": 120 },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "child_count": { "type": "integer", "minimum": 0 },
+        "scene_file_path": { "type": "string", "maxLength": 512 },
+        "script_path": { "type": "string", "maxLength": 512 },
+        "groups": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "maxLength": 120 }
+        },
+        "visibility": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "visible": { "type": "boolean" },
+            "visible_in_tree": { "type": "boolean" }
+          }
+        },
+        "state": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "object", "array", "null"]
+          }
+        },
+        "children_truncated": { "type": "boolean" },
+        "omitted_child_count": { "type": "integer", "minimum": 0 },
+        "children": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/node" }
+        }
+      }
+    }
+  }
+}

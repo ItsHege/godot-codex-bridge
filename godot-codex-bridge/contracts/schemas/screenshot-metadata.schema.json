@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/contracts/screenshot-metadata.schema.json",
+  "title": "Godot Codex Bridge Screenshot Metadata v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "screenshot_id",
+    "captured_at",
+    "artifact",
+    "viewport",
+    "privacy"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "godot-codex-bridge/0.1"
+    },
+    "screenshot_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scene_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512
+    },
+    "selected_node_paths": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_path",
+        "project_relative_path",
+        "format",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "local_path": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Local filesystem path or bridge-relative path. Never an external URL."
+        },
+        "project_relative_path": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^\\.godot/godot_codex_bridge/artifacts/screenshots/.+\\.png$"
+        },
+        "format": {
+          "const": "png"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "mode"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "editor_3d_viewport",
+            "game_viewport",
+            "unknown"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "perspective",
+            "orthogonal",
+            "camera_preview",
+            "game",
+            "unknown"
+          ]
+        },
+        "camera_node_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "render_scale": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 8
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "external_upload_allowed"
+      ],
+      "properties": {
+        "classification": {
+          "const": "local_sensitive_evidence"
+        },
+        "external_upload_allowed": {
+          "const": false
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          }
+        }
+      }
+    }
+  }
+}
+

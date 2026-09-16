@@ -1,0 +1,43 @@
+{
+  "protocol_version": "godot-codex-bridge/0.1",
+  "request_id": "req_20260613_120500_screenshot",
+  "type": "capture_viewport_screenshot",
+  "status": "succeeded",
+  "created_at": "2026-06-13T12:05:00Z",
+  "completed_at": "2026-06-13T12:05:01Z",
+  "data": {
+    "screenshot": {
+      "protocol_version": "godot-codex-bridge/0.1",
+      "screenshot_id": "shot_20260613_120501_editor_3d",
+      "captured_at": "2026-06-13T12:05:01Z",
+      "scene_path": "res://scenes/main_3d.tscn",
+      "selected_node_paths": [
+        "/root/Main3D/Camera3D"
+      ],
+      "artifact": {
+        "local_path": "C:/path/to/godot-codex-bridge/godot-codex-bridge/examples/minimal_3d_project/.godot/godot_codex_bridge/artifacts/screenshots/shot_20260613_120501_editor_3d.png",
+        "project_relative_path": ".godot/godot_codex_bridge/artifacts/screenshots/shot_20260613_120501_editor_3d.png",
+        "format": "png",
+        "width": 1280,
+        "height": 720,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_size": 245760
+      },
+      "viewport": {
+        "source": "editor_3d_viewport",
+        "mode": "camera_preview",
+        "camera_node_path": "/root/Main3D/Camera3D",
+        "render_scale": 1
+      },
+      "privacy": {
+        "classification": "local_sensitive_evidence",
+        "external_upload_allowed": false,
+        "notes": [
+          "May include private project assets."
+        ]
+      }
+    }
+  },
+  "error": null
+}
+

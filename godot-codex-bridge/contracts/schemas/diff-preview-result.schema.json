@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/contracts/diff-preview-result.schema.json",
+  "title": "Godot Codex Bridge Diff Preview Result v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "preview_id",
+    "generated_at",
+    "status",
+    "applied",
+    "affected_files",
+    "unified_diff",
+    "rollback_plan",
+    "approval"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "godot-codex-bridge/0.1"
+    },
+    "preview_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "preview_ready",
+        "rejected",
+        "error"
+      ]
+    },
+    "applied": {
+      "const": false,
+      "description": "MVP diff preview never applies changes."
+    },
+    "affected_files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/affected_file"
+      }
+    },
+    "unified_diff": {
+      "type": "string",
+      "maxLength": 200000
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "rollback_plan": {
+      "$ref": "#/$defs/rollback_plan"
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "approved"
+      ],
+      "properties": {
+        "required": {
+          "const": true
+        },
+        "approved": {
+          "const": false
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "safety_warnings": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "error": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "path_rejected",
+            "binary_file_rejected",
+            "generated_file_rejected",
+            "diff_too_large",
+            "internal_error"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    }
+  },
+  "$defs": {
+    "affected_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_relative_path",
+        "change_kind",
+        "allowed_text_file",
+        "before_hash",
+        "after_hash"
+      ],
+      "properties": {
+        "project_relative_path": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\.\\.)(?!\\.godot/)(?!.*\\.import$).+\\.(gd|tscn|tres|cfg|json|md|txt)$"
+        },
+        "change_kind": {
+          "type": "string",
+          "enum": [
+            "create",
+            "modify",
+            "delete"
+          ]
+        },
+        "allowed_text_file": {
+          "const": true
+        },
+        "before_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "after_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      }
+    },
+    "rollback_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy",
+        "snapshot_required",
+        "notes"
+      ],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "restore_original_file_contents",
+            "restore_snapshot_then_reimport",
+            "manual_review_required"
+          ]
+        },
+        "snapshot_required": {
+          "type": "boolean"
+        },
+        "snapshot_paths": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,45 @@
+name: Feature Request
+description: Suggest an enhancement, new tool, or capability for Godot Codex Bridge
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a new capability or improvement for Godot Codex Bridge!
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Target Component
+      description: Where would this feature live?
+      options:
+        - MCP Server (new tool, schema, or resource)
+        - Codex Host (relay, connection management, protocol)
+        - Godot Addon (editor dock, GDScript core, visual tools)
+        - Safety & Guardrails (permissions, confirmation gates)
+        - Documentation / Examples
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What limitation or workflow obstacle does this feature address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the proposed tool, interface, or behavioral change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative designs, manual workarounds, or existing tools you considered.

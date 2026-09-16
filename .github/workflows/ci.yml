@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: Node ${{ matrix.node-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest ]
+        node-version: [ '20.x', '22.x' ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install root and workspace dependencies
+        run: npm ci
+
+      - name: Compile TypeScript packages (MCP Server & Codex Host)
+        run: npm run build
+
+      - name: Run MCP Server test suite
+        run: npm run test:mcp
+
+      - name: Run Codex Host test suite
+        run: npm run test:host
+
+      # Note on Godot Addon Headless Testing:
+      # Godot addon core tests (64 suites) require a Godot 4.3+ binary and run via
+      # `npm run validate:addon-core` (or `godot-codex-bridge/scripts/validate_addon_core.ps1`).
+      # To prevent fragile CI runners and environment-dependent binary paths, Godot-level
+      # validation is maintained as local developer pre-flight checks rather than unpinned CI jobs.

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/schemas/runtime-events.schema.json",
+  "title": "Godot Codex Bridge Runtime Events",
+  "type": "object",
+  "required": [
+    "runtime_events_version",
+    "generated_at",
+    "source",
+    "event_count",
+    "max_events",
+    "truncated",
+    "events",
+    "observability",
+    "privacy"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "runtime_events_version": {
+      "const": "godot-codex-bridge/runtime-events-v1"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "event_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_events": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2000
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "observability": {
+      "type": "object",
+      "required": [
+        "level",
+        "arbitrary_script_execution",
+        "scene_mutation",
+        "scene_save",
+        "input_injection"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "arbitrary_script_execution": {
+          "const": false
+        },
+        "scene_mutation": {
+          "const": false
+        },
+        "scene_save": {
+          "const": false
+        },
+        "input_injection": {
+          "oneOf": [
+            {
+              "const": false
+            },
+            {
+              "const": "gated_playtest_commands_only"
+            }
+          ]
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "required": [
+        "classification",
+        "external_upload_allowed"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "classification": {
+          "type": "string"
+        },
+        "external_upload_allowed": {
+          "const": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "required": [
+        "id",
+        "at",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "probe_ready",
+            "scene_changed",
+            "node_added",
+            "node_removed",
+            "input_action_pressed",
+            "input_action_released",
+            "playtest_input_applied",
+            "playtest_input_failed"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

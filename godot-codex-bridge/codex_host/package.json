@@ -1,0 +1,27 @@
+{
+  "name": "godot-codex-bridge-codex-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "doctor": "tsx src/doctor.ts --json",
+    "generate:schemas": "codex app-server generate-ts --out ./schemas && codex app-server generate-json-schema --out ./schemas/json && tsx scripts/write_schema_lock.ts",
+    "start": "node dist/src/index.js",
+    "dev": "tsx src/index.ts --runtime mock",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\""
+  },
+  "dependencies": {
+    "ws": "^8.18.3",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.2",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schema_lock_version": 1,
+  "generated_at": "2026-06-22T17:15:48.650Z",
+  "commands": [
+    "codex app-server generate-ts --out ./schemas",
+    "codex app-server generate-json-schema --out ./schemas/json"
+  ],
+  "codex_cli_version": "codex-cli 0.141.0",
+  "files": {
+    "schemas/ServerRequest.ts": {
+      "bytes": 2160,
+      "sha256": "6274decabc5c0e9b09f144efb1795ca8fc1fe52d8afa42ee5988de2d890f935e"
+    },
+    "schemas/ServerNotification.ts": {
+      "bytes": 12096,
+      "sha256": "c1c453a6cd2db52199f54d9679ac29608cc5415fceabe90dae3cf5e2b24d35df"
+    },
+    "schemas/json/codex_app_server_protocol.schemas.json": {
+      "bytes": 538586,
+      "sha256": "3d0ef07416e2efc19eadf61ebd455d5c77e2559e25dccd5ff80f316eccbb6b79"
+    },
+    "schemas/json/codex_app_server_protocol.v2.schemas.json": {
+      "bytes": 451138,
+      "sha256": "39892b8d4e1267a44556d5536d0db4eed6ac7ed9e0b800f3bb6ebea5f5bff83e"
+    }
+  }
+}

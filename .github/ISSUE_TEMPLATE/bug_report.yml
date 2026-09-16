@@ -1,0 +1,80 @@
+name: Bug Report
+description: Report a defect, error, or unexpected behavior in Godot Codex Bridge
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Please fill out the sections below to help us diagnose and reproduce the issue.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: Which part of the bridge is affected?
+      options:
+        - MCP Server (tools, resources, RPC)
+        - Codex Host (local daemon, WebSocket, app-server)
+        - Godot Addon (dock, GDScript runtime, editor hooks)
+        - UI (in-editor chat dock, Eye Attach annotations)
+        - Runtime / Playtest (probes, input simulation, scenarios)
+        - Permissions / Safety (guardrails, approval tokens, boundary checks)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Open Godot project with addon enabled
+        2. Start MCP server with command: ...
+        3. Issue prompt / tool call: ...
+        4. See error: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Information
+      description: Details about your local setup.
+      value: |
+        - Godot Version: (e.g. 4.3 stable, 4.4, 4.7)
+        - Operating System: (e.g. Windows 11, Ubuntu 24.04, macOS Sonoma)
+        - Node.js Version: (e.g. 20.11.0, 22.x)
+        - Client / Agent: (e.g. OpenAI Codex CLI, Claude Desktop, Cursor, Antigravity)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or Screenshots
+      description: Relevant terminal output, Godot debugger output, `.godot/godot_codex_bridge/logs/`, or screenshots.

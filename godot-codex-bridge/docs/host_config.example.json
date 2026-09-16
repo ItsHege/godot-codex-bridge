@@ -1,0 +1,12 @@
+{
+    "protocol_version": "godot-codex-bridge/0.1",
+    "generated_at": "2026-01-01T00:00:00.0000000Z",
+    "addon_version": "0.1.0",
+    "product_root": "/path/to/godot-codex-bridge/godot-codex-bridge",
+    "host_root": "/path/to/godot-codex-bridge/godot-codex-bridge/codex_host",
+    "start_script": "/path/to/godot-codex-bridge/godot-codex-bridge/scripts/start_codex_host.ps1",
+    "node_entry": "/path/to/godot-codex-bridge/godot-codex-bridge/codex_host/dist/src/index.js",
+    "port": 49390,
+    "runtime": "app-server",
+    "launch_mode": "local_hidden_process"
+}

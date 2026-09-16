@@ -1,0 +1,23 @@
+{
+  "name": "godot-codex-bridge-repo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Root developer workspace for Godot Codex Bridge (MCP Server and Codex Host).",
+  "workspaces": [
+    "godot-codex-bridge/mcp_server",
+    "godot-codex-bridge/codex_host"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:mcp": "npm run build --workspace=godot-codex-bridge-mcp-server",
+    "build:host": "npm run build --workspace=godot-codex-bridge-codex-host",
+    "test": "npm run test:mcp && npm run test:host",
+    "test:mcp": "npm run test --workspace=godot-codex-bridge-mcp-server",
+    "test:host": "npm run test --workspace=godot-codex-bridge-codex-host",
+    "doctor": "npm run doctor --workspaces",
+    "validate:addon-core": "npm --prefix godot-codex-bridge run validate:addon-core"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/contracts/bridge-request.schema.json",
+  "title": "Godot Codex Bridge Request v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "request_id",
+    "type",
+    "created_at",
+    "payload"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "godot-codex-bridge/0.1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "refresh_context",
+        "capture_viewport_screenshot",
+        "run_current_scene"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/refresh_context_payload"
+        },
+        {
+          "$ref": "#/$defs/capture_viewport_screenshot_payload"
+        },
+        {
+          "$ref": "#/$defs/run_current_scene_payload"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "refresh_context_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "include_selected_properties": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_nodes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 1000
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128,
+          "default": 32
+        }
+      }
+    },
+    "capture_viewport_screenshot_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "editor_3d_viewport",
+            "game_viewport",
+            "auto"
+          ],
+          "default": "auto"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "include_selection_overlay": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "run_current_scene_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000,
+          "default": 60000
+        },
+        "capture_output": {
+          "type": "boolean",
+          "default": true
+        },
+        "capture_screenshot_after_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 120000,
+          "default": null
+        }
+      }
+    }
+  }
+}
+

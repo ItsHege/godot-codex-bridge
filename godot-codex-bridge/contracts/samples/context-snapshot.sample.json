@@ -1,0 +1,396 @@
+{
+  "protocol_version": "godot-codex-bridge/0.1",
+  "generated_at": "2026-06-13T12:00:00Z",
+  "bridge": {
+    "local_bridge_dir": ".godot/godot_codex_bridge",
+    "snapshot_path": ".godot/godot_codex_bridge/context_snapshot.json",
+    "requests_dir": ".godot/godot_codex_bridge/requests",
+    "responses_dir": ".godot/godot_codex_bridge/responses",
+    "artifacts_dir": ".godot/godot_codex_bridge/artifacts",
+    "addon_version": "0.1.0",
+    "status": "active"
+  },
+  "project": {
+    "name": "minimal_3d_project",
+    "root_path": "C:/path/to/godot-codex-bridge/godot-codex-bridge/examples/minimal_3d_project",
+    "godot_version": "4.7.1.stable.official.a13da4feb",
+    "project_file": "project.godot",
+    "main_scene": "res://scenes/main_3d.tscn",
+    "features": [
+      "3d",
+      "editor_bridge"
+    ]
+  },
+  "current_scene": {
+    "path": "res://scenes/main_3d.tscn",
+    "name": "Main3D",
+    "root_node": {
+      "path": "/root/Main3D",
+      "name": "Main3D",
+      "type": "Node3D"
+    },
+    "is_dirty": false,
+    "open_scenes": [
+      "res://scenes/main_3d.tscn"
+    ]
+  },
+  "scene_tree": {
+    "root": {
+      "path": "/root/Main3D",
+      "name": "Main3D",
+      "type": "Node3D",
+      "parent_path": null,
+      "owner_path": "/root/Main3D",
+      "scene_file_path": "res://scenes/main_3d.tscn",
+      "script_path": null,
+      "groups": [],
+      "child_count": 5,
+      "three_d": {
+        "transform": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "rotation_degrees": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        "visible": true
+      },
+      "children": [
+        {
+          "path": "/root/Main3D/Camera3D",
+          "name": "Camera3D",
+          "type": "Camera3D",
+          "parent_path": "/root/Main3D",
+          "owner_path": "/root/Main3D",
+          "scene_file_path": "res://scenes/main_3d.tscn",
+          "script_path": null,
+          "groups": [],
+          "child_count": 0,
+          "three_d": {
+            "transform": {
+              "position": {
+                "x": 0,
+                "y": 3,
+                "z": 6
+              },
+              "rotation_degrees": {
+                "x": -25,
+                "y": 0,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              }
+            },
+            "visible": true,
+            "camera": {
+              "current": true,
+              "projection": "perspective",
+              "fov_degrees": 70,
+              "size": null,
+              "near": 0.05,
+              "far": 4000
+            }
+          },
+          "children": []
+        },
+        {
+          "path": "/root/Main3D/KeyLight",
+          "name": "KeyLight",
+          "type": "DirectionalLight3D",
+          "parent_path": "/root/Main3D",
+          "owner_path": "/root/Main3D",
+          "scene_file_path": "res://scenes/main_3d.tscn",
+          "script_path": null,
+          "groups": [],
+          "child_count": 0,
+          "three_d": {
+            "transform": {
+              "position": {
+                "x": 0,
+                "y": 4,
+                "z": 0
+              },
+              "rotation_degrees": {
+                "x": -45,
+                "y": 30,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              }
+            },
+            "visible": true,
+            "light": {
+              "light_type": "DirectionalLight3D",
+              "energy": 1.25,
+              "color": "#ffffff",
+              "range": null,
+              "shadows_enabled": true
+            }
+          },
+          "children": []
+        },
+        {
+          "path": "/root/Main3D/Ground",
+          "name": "Ground",
+          "type": "MeshInstance3D",
+          "parent_path": "/root/Main3D",
+          "owner_path": "/root/Main3D",
+          "scene_file_path": "res://scenes/main_3d.tscn",
+          "script_path": null,
+          "groups": [],
+          "child_count": 0,
+          "three_d": {
+            "transform": {
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "rotation_degrees": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "scale": {
+                "x": 8,
+                "y": 1,
+                "z": 8
+              }
+            },
+            "visible": true,
+            "mesh": {
+              "mesh_resource_path": "res://meshes/ground.tres",
+              "surface_count": 1,
+              "material_count": 1,
+              "aabb": {
+                "position": {
+                  "x": -0.5,
+                  "y": -0.5,
+                  "z": -0.5
+                },
+                "size": {
+                  "x": 1,
+                  "y": 1,
+                  "z": 1
+                }
+              }
+            }
+          },
+          "children": []
+        },
+        {
+          "path": "/root/Main3D/GroundCollision",
+          "name": "GroundCollision",
+          "type": "CollisionShape3D",
+          "parent_path": "/root/Main3D",
+          "owner_path": "/root/Main3D",
+          "scene_file_path": "res://scenes/main_3d.tscn",
+          "script_path": null,
+          "groups": [],
+          "child_count": 0,
+          "three_d": {
+            "transform": {
+              "position": {
+                "x": 0,
+                "y": -0.5,
+                "z": 0
+              },
+              "rotation_degrees": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "scale": {
+                "x": 8,
+                "y": 1,
+                "z": 8
+              }
+            },
+            "visible": true,
+            "collision_shape": {
+              "shape_type": "BoxShape3D",
+              "disabled": false,
+              "shape_resource_path": null
+            }
+          },
+          "children": []
+        },
+        {
+          "path": "/root/Main3D/NavRegion",
+          "name": "NavRegion",
+          "type": "NavigationRegion3D",
+          "parent_path": "/root/Main3D",
+          "owner_path": "/root/Main3D",
+          "scene_file_path": "res://scenes/main_3d.tscn",
+          "script_path": null,
+          "groups": [],
+          "child_count": 0,
+          "three_d": {
+            "transform": {
+              "position": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "rotation_degrees": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "scale": {
+                "x": 1,
+                "y": 1,
+                "z": 1
+              }
+            },
+            "visible": true,
+            "navigation_region": {
+              "enabled": true,
+              "navigation_mesh_path": "res://navigation/main_navmesh.tres",
+              "bake_status": "baked"
+            }
+          },
+          "children": []
+        }
+      ]
+    },
+    "node_count": 6,
+    "truncated": false,
+    "limits": {
+      "max_nodes": 1000,
+      "max_depth": 32,
+      "max_properties_per_node": 80,
+      "max_string_length": 512
+    }
+  },
+  "selected_nodes": [
+    {
+      "node": {
+        "path": "/root/Main3D/Camera3D",
+        "name": "Camera3D",
+        "type": "Camera3D",
+        "parent_path": "/root/Main3D",
+        "owner_path": "/root/Main3D",
+        "scene_file_path": "res://scenes/main_3d.tscn",
+        "script_path": null,
+        "groups": [],
+        "child_count": 0,
+        "three_d": {
+          "transform": {
+            "position": {
+              "x": 0,
+              "y": 3,
+              "z": 6
+            },
+            "rotation_degrees": {
+              "x": -25,
+              "y": 0,
+              "z": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          },
+          "visible": true,
+          "camera": {
+            "current": true,
+            "projection": "perspective",
+            "fov_degrees": 70,
+            "size": null,
+            "near": 0.05,
+            "far": 4000
+          }
+        },
+        "children": []
+      },
+      "properties_summary": [
+        {
+          "name": "current",
+          "value_type": "bool",
+          "value_summary": true,
+          "source": "node_api",
+          "included_reason": "camera framing diagnostic",
+          "redacted": false,
+          "omitted_reason": null
+        },
+        {
+          "name": "environment",
+          "value_type": "Environment",
+          "value_summary": "omitted: resource contents not expanded",
+          "source": "inspector",
+          "included_reason": "privacy-aware property placeholder",
+          "redacted": true,
+          "omitted_reason": "unsupported_type"
+        }
+      ],
+      "summary_limits": {
+        "max_nodes": 1000,
+        "max_depth": 32,
+        "max_properties_per_node": 80,
+        "max_string_length": 512
+      }
+    }
+  ],
+  "resource_status": {
+    "scan_status": "complete",
+    "resources": [
+      {
+        "path": "res://scenes/main_3d.tscn",
+        "type": "PackedScene",
+        "status": "ok",
+        "owner_node_paths": [
+          "/root/Main3D"
+        ],
+        "message": null
+      }
+    ],
+    "missing_resources": [],
+    "import_errors": [],
+    "truncated": false,
+    "limits": {
+      "max_nodes": 1000,
+      "max_depth": 32,
+      "max_properties_per_node": 80,
+      "max_string_length": 512
+    }
+  },
+  "editor_output": {
+    "captured_at": "2026-06-13T12:00:00Z",
+    "source": "bridge_log",
+    "entries": [
+      {
+        "timestamp": "2026-06-13T12:00:00Z",
+        "level": "info",
+        "message": "Context snapshot refreshed.",
+        "file": null,
+        "line": null
+      }
+    ],
+    "truncated": false,
+    "limits": {
+      "max_nodes": 1000,
+      "max_depth": 32,
+      "max_properties_per_node": 80,
+      "max_string_length": 512
+    }
+  },
+  "screenshots": []
+}

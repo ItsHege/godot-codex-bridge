@@ -1,0 +1,36 @@
+{
+  "protocol_version": "godot-codex-bridge/0.1",
+  "preview_id": "preview_20260613_121000_camera_fix",
+  "generated_at": "2026-06-13T12:10:00Z",
+  "status": "preview_ready",
+  "applied": false,
+  "affected_files": [
+    {
+      "project_relative_path": "scenes/main_3d.tscn",
+      "change_kind": "modify",
+      "allowed_text_file": true,
+      "before_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "after_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "unified_diff": "--- a/scenes/main_3d.tscn\n+++ b/scenes/main_3d.tscn\n@@ -10,7 +10,7 @@\n-transform = Transform3D(...)\n+transform = Transform3D(...)\n",
+  "summary": "Preview adjusts Camera3D transform only. No files were changed.",
+  "rollback_plan": {
+    "strategy": "restore_original_file_contents",
+    "snapshot_required": true,
+    "snapshot_paths": [
+      ".godot/godot_codex_bridge/artifacts/snapshots/scenes/main_3d.tscn.before"
+    ],
+    "notes": "If approved in a future apply flow, restore the saved original scene file and reimport if validation fails."
+  },
+  "approval": {
+    "required": true,
+    "approved": false,
+    "instructions": "User approval is required before any future apply operation."
+  },
+  "safety_warnings": [
+    "Diff preview only; MVP contract does not authorize apply."
+  ],
+  "error": null
+}
+

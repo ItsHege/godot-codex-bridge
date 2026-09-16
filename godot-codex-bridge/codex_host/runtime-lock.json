@@ -1,0 +1,12 @@
+{
+  "codex_cli_version": "codex-cli 0.137.0",
+  "generated_at": "2026-06-14T11:44:00Z",
+  "commands": [
+    "codex app-server generate-ts --out godot-codex-bridge\\codex_host\\schemas",
+    "codex app-server generate-json-schema --out godot-codex-bridge\\codex_host\\schemas\\json"
+  ],
+  "notes": [
+    "Generated schemas are the compatibility lock for this installed Codex app-server runtime.",
+    "Regenerate and review schema diffs after upgrading Codex CLI."
+  ]
+}

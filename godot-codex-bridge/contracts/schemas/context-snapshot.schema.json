@@ -1,0 +1,1473 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/contracts/context-snapshot.schema.json",
+  "title": "Godot Codex Bridge Context Snapshot v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "generated_at",
+    "bridge",
+    "project",
+    "current_scene",
+    "scene_tree",
+    "selected_nodes",
+    "resource_status",
+    "editor_output",
+    "screenshots"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "godot-codex-bridge/0.1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "bridge": {
+      "$ref": "#/$defs/bridge_info"
+    },
+    "project": {
+      "$ref": "#/$defs/project_info"
+    },
+    "current_scene": {
+      "$ref": "#/$defs/current_scene"
+    },
+    "editor_state": {
+      "$ref": "#/$defs/editor_state"
+    },
+    "scene_tree": {
+      "$ref": "#/$defs/scene_tree"
+    },
+    "selected_nodes": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/selected_node"
+      }
+    },
+    "resource_status": {
+      "$ref": "#/$defs/resource_status"
+    },
+    "editor_output": {
+      "$ref": "#/$defs/editor_output"
+    },
+    "gameplay_context": {
+      "$ref": "#/$defs/gameplay_context"
+    },
+    "script_inventory": {
+      "$ref": "#/$defs/script_inventory"
+    },
+    "performance": {
+      "$ref": "#/$defs/performance_snapshot"
+    },
+    "screenshots": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/screenshot_metadata"
+      }
+    }
+  },
+  "$defs": {
+    "screenshot_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "screenshot_id",
+        "captured_at",
+        "artifact",
+        "viewport",
+        "privacy"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "godot-codex-bridge/0.1"
+        },
+        "screenshot_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.-]+$"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scene_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "selected_node_paths": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "local_path",
+            "project_relative_path",
+            "format",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "local_path": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "project_relative_path": {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^\\.godot/godot_codex_bridge/artifacts/screenshots/.+\\.png$"
+            },
+            "format": {
+              "const": "png"
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{64}$"
+            },
+            "byte_size": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "mode"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": [
+                "editor_3d_viewport",
+                "game_viewport",
+                "unknown"
+              ]
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "perspective",
+                "orthogonal",
+                "camera_preview",
+                "game",
+                "unknown"
+              ]
+            },
+            "camera_node_path": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 512
+            },
+            "render_scale": {
+              "type": "number",
+              "minimum": 0.01,
+              "maximum": 8
+            }
+          }
+        },
+        "privacy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "classification",
+            "external_upload_allowed"
+          ],
+          "properties": {
+            "classification": {
+              "const": "local_sensitive_evidence"
+            },
+            "external_upload_allowed": {
+              "const": false
+            },
+            "notes": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "maxLength": 240
+              }
+            }
+          }
+        }
+      }
+    },
+    "bridge_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_bridge_dir",
+        "snapshot_path",
+        "requests_dir",
+        "responses_dir",
+        "artifacts_dir"
+      ],
+      "properties": {
+        "local_bridge_dir": {
+          "const": ".godot/godot_codex_bridge"
+        },
+        "snapshot_path": {
+          "const": ".godot/godot_codex_bridge/context_snapshot.json"
+        },
+        "requests_dir": {
+          "const": ".godot/godot_codex_bridge/requests"
+        },
+        "responses_dir": {
+          "const": ".godot/godot_codex_bridge/responses"
+        },
+        "artifacts_dir": {
+          "const": ".godot/godot_codex_bridge/artifacts"
+        },
+        "addon_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "starting",
+            "degraded",
+            "unavailable"
+          ]
+        }
+      }
+    },
+    "editor_state": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "project_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "root_path",
+        "godot_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "root_path": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "godot_version": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "project_file": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "main_scene": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "features": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "current_scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "root_node",
+        "is_dirty",
+        "open_scenes"
+      ],
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "root_node": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "name",
+            "type"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "type": {
+              "type": "string",
+              "maxLength": 160
+            }
+          }
+        },
+        "is_dirty": {
+          "type": "boolean"
+        },
+        "open_scenes": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "scene_tree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "node_count",
+        "truncated",
+        "limits"
+      ],
+      "properties": {
+        "root": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "node_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "limits": {
+          "$ref": "#/$defs/summary_limits"
+        }
+      }
+    },
+    "node_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "name",
+        "type"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 160
+        }
+      }
+    },
+    "node_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "name",
+        "type",
+        "child_count",
+        "children"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "parent_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "owner_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "scene_file_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "script_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "groups": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "child_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "three_d": {
+          "$ref": "#/$defs/three_d_hints"
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/node_summary"
+          }
+        }
+      }
+    },
+    "three_d_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transform": {
+          "$ref": "#/$defs/transform_3d"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "camera": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "light": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "mesh": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "collision_shape": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "navigation_region": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "transform_3d": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "rotation_degrees",
+        "scale"
+      ],
+      "properties": {
+        "position": {
+          "$ref": "#/$defs/vector3"
+        },
+        "rotation_degrees": {
+          "$ref": "#/$defs/vector3"
+        },
+        "scale": {
+          "$ref": "#/$defs/vector3"
+        }
+      }
+    },
+    "vector3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      }
+    },
+    "camera_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current",
+        "projection"
+      ],
+      "properties": {
+        "current": {
+          "type": "boolean"
+        },
+        "projection": {
+          "type": "string",
+          "enum": [
+            "perspective",
+            "orthogonal",
+            "frustum",
+            "unknown"
+          ]
+        },
+        "fov_degrees": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 179
+        },
+        "size": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "near": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "far": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "light_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "light_type",
+        "energy",
+        "shadows_enabled"
+      ],
+      "properties": {
+        "light_type": {
+          "type": "string",
+          "enum": [
+            "DirectionalLight3D",
+            "OmniLight3D",
+            "SpotLight3D",
+            "Light3D",
+            "unknown"
+          ]
+        },
+        "energy": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 32
+        },
+        "range": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "shadows_enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "mesh_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mesh_resource_path",
+        "surface_count",
+        "material_count"
+      ],
+      "properties": {
+        "mesh_resource_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "surface_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "material_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "aabb": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "collision_shape_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shape_type",
+        "disabled"
+      ],
+      "properties": {
+        "shape_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "shape_resource_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        }
+      }
+    },
+    "navigation_region_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "navigation_mesh_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "bake_status": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "not_baked",
+            "baked",
+            "stale",
+            "error"
+          ]
+        }
+      }
+    },
+    "aabb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "size"
+      ],
+      "properties": {
+        "position": {
+          "$ref": "#/$defs/vector3"
+        },
+        "size": {
+          "$ref": "#/$defs/vector3"
+        }
+      }
+    },
+    "selected_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node",
+        "properties_summary",
+        "summary_limits"
+      ],
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/node_summary"
+        },
+        "properties_summary": {
+          "type": "array",
+          "maxItems": 80,
+          "items": {
+            "$ref": "#/$defs/property_summary"
+          }
+        },
+        "summary_limits": {
+          "$ref": "#/$defs/summary_limits"
+        }
+      }
+    },
+    "property_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value_type",
+        "value_summary",
+        "source",
+        "redacted"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "value_type": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "value_summary": {
+          "type": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "inspector",
+            "node_api",
+            "resource_metadata",
+            "derived"
+          ]
+        },
+        "included_reason": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "omitted_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "large_value",
+            "binary_or_image",
+            "script_body",
+            "secret_like_name",
+            "unsupported_type",
+            "context_budget",
+            null
+          ]
+        }
+      }
+    },
+    "resource_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scan_status",
+        "resources",
+        "missing_resources",
+        "import_errors",
+        "truncated",
+        "limits"
+      ],
+      "properties": {
+        "scan_status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable",
+            "error"
+          ]
+        },
+        "resources": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/resource_summary"
+          }
+        },
+        "missing_resources": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "import_errors": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/editor_entry"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "limits": {
+          "$ref": "#/$defs/summary_limits"
+        }
+      }
+    },
+    "resource_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "type",
+        "status"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "missing",
+            "import_pending",
+            "import_error",
+            "load_error",
+            "unknown"
+          ]
+        },
+        "owner_node_paths": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        }
+      }
+    },
+    "editor_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_at",
+        "source",
+        "entries",
+        "truncated",
+        "limits"
+      ],
+      "properties": {
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "bridge_log",
+            "godot_cli",
+            "editor_output_panel",
+            "unsupported"
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 300,
+          "items": {
+            "$ref": "#/$defs/editor_entry"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "limits": {
+          "$ref": "#/$defs/summary_limits"
+        }
+      }
+    },
+    "editor_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "message"
+      ],
+      "properties": {
+        "timestamp": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "performance_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_at",
+        "source",
+        "status",
+        "monitors",
+        "limits"
+      ],
+      "properties": {
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "godot_performance_monitor",
+            "unavailable"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable"
+          ]
+        },
+        "monitors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "time_fps": {
+              "type": "number"
+            },
+            "render_total_objects_in_frame": {
+              "type": "number"
+            },
+            "render_total_primitives_in_frame": {
+              "type": "number"
+            },
+            "render_total_draw_calls_in_frame": {
+              "type": "number"
+            },
+            "physics_3d_active_objects": {
+              "type": "number"
+            },
+            "physics_3d_collision_pairs": {
+              "type": "number"
+            },
+            "physics_3d_island_count": {
+              "type": "number"
+            },
+            "navigation_active_maps": {
+              "type": "number"
+            },
+            "navigation_region_count": {
+              "type": "number"
+            },
+            "navigation_agent_count": {
+              "type": "number"
+            }
+          }
+        },
+        "sample_interval_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "samples": {
+          "type": "array",
+          "maxItems": 120,
+          "items": {
+            "$ref": "#/$defs/performance_sample"
+          }
+        },
+        "limits": {
+          "$ref": "#/$defs/summary_limits"
+        }
+      }
+    },
+    "gameplay_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_at",
+        "input_actions",
+        "autoloads",
+        "layer_names",
+        "project_settings",
+        "limits"
+      ],
+      "properties": {
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "input_actions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/input_action_summary"
+          }
+        },
+        "autoloads": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/autoload_summary"
+          }
+        },
+        "layer_names": {
+          "type": "object"
+        },
+        "project_settings": {
+          "type": "object"
+        },
+        "limits": {
+          "type": "object"
+        }
+      }
+    },
+    "input_action_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "setting",
+        "built_in",
+        "events",
+        "event_count"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "setting": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "built_in": {
+          "type": "boolean"
+        },
+        "deadzone": {
+          "type": [
+            "number",
+            "integer",
+            "null"
+          ]
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object"
+          }
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "autoload_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path",
+        "singleton"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "singleton": {
+          "type": "boolean"
+        }
+      }
+    },
+    "script_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_at",
+        "scripts",
+        "script_count",
+        "truncated",
+        "limits"
+      ],
+      "properties": {
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scripts": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/script_summary"
+          }
+        },
+        "script_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "limits": {
+          "type": "object"
+        }
+      }
+    },
+    "script_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "class_name",
+        "extends",
+        "is_tool",
+        "signals",
+        "exports",
+        "functions",
+        "todos",
+        "line_count_scanned",
+        "truncated"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "class_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "extends": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "is_tool": {
+          "type": "boolean"
+        },
+        "signals": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/script_symbol"
+          }
+        },
+        "exports": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/script_symbol"
+          }
+        },
+        "functions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/script_symbol"
+          }
+        },
+        "todos": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/script_todo"
+          }
+        },
+        "line_count_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "read_error": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "script_symbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line",
+        "signature"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "script_todo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line",
+        "text"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "performance_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_at",
+        "monitors"
+      ],
+      "properties": {
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "monitors": {
+          "$ref": "#/$defs/performance_monitors"
+        }
+      }
+    },
+    "performance_monitors": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "time_fps": {
+          "type": "number"
+        },
+        "render_total_objects_in_frame": {
+          "type": "number"
+        },
+        "render_total_primitives_in_frame": {
+          "type": "number"
+        },
+        "render_total_draw_calls_in_frame": {
+          "type": "number"
+        },
+        "physics_3d_active_objects": {
+          "type": "number"
+        },
+        "physics_3d_collision_pairs": {
+          "type": "number"
+        },
+        "physics_3d_island_count": {
+          "type": "number"
+        },
+        "navigation_active_maps": {
+          "type": "number"
+        },
+        "navigation_region_count": {
+          "type": "number"
+        },
+        "navigation_agent_count": {
+          "type": "number"
+        }
+      }
+    },
+    "summary_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_nodes",
+        "max_depth",
+        "max_properties_per_node",
+        "max_string_length"
+      ],
+      "properties": {
+        "max_nodes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "max_properties_per_node": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "max_string_length": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 10000
+        }
+      }
+    }
+  }
+}

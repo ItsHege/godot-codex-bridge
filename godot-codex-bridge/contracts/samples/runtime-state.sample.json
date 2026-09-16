@@ -1,0 +1,270 @@
+{
+  "runtime_state_version": "godot-codex-bridge/runtime-state-v1",
+  "generated_at": "2026-06-23T12:00:00Z",
+  "reason": "interval",
+  "project": {
+    "name": "Minimal 3D Fixture",
+    "main_scene": "res://scenes/main_3d.tscn"
+  },
+  "tree": {
+    "current_scene": "/root/Main3D",
+    "root": "/root/Main3D",
+    "paused": false,
+    "node_count_sampled": 3,
+    "node_type_counts": {
+      "Node3D": 1,
+      "CharacterBody3D": 1,
+      "CanvasLayer": 1,
+      "Camera3D": 1,
+      "Timer": 1
+    },
+    "summary": {
+      "active_scene_name": "Main3D",
+      "active_scene_type": "Node3D",
+      "active_scene_path": "/root/Main3D",
+      "current_scene": "/root/Main3D",
+      "node_count_sampled": 5,
+      "top_node_types": [
+        { "type": "Camera3D", "count": 1 },
+        { "type": "CanvasLayer", "count": 1 },
+        { "type": "CharacterBody3D", "count": 1 },
+        { "type": "Node3D", "count": 1 },
+        { "type": "Timer", "count": 1 }
+      ],
+      "key_position_count": 3,
+      "autoload_count": 1,
+      "truncated": false
+    },
+    "active_scene": {
+      "path": "/root/Main3D",
+      "name": "Main3D",
+      "type": "Node3D",
+      "scene_file_path": "res://scenes/main_3d.tscn",
+      "script_path": "",
+      "child_count": 4
+    },
+    "key_positions": [
+      {
+        "path": "/root/Main3D",
+        "name": "Main3D",
+        "type": "Node3D",
+        "dimension": "3d",
+        "position": { "x": 0, "y": 0, "z": 0 },
+        "global_position": { "x": 0, "y": 0, "z": 0 }
+      },
+      {
+        "path": "/root/Main3D/Player",
+        "name": "Player",
+        "type": "CharacterBody3D",
+        "dimension": "3d",
+        "position": { "x": 1, "y": 0, "z": 3 },
+        "global_position": { "x": 1, "y": 0, "z": 3 }
+      },
+      {
+        "path": "/root/Main3D/Camera3D",
+        "name": "Camera3D",
+        "type": "Camera3D",
+        "dimension": "3d",
+        "position": { "x": 0, "y": 3, "z": 8 },
+        "global_position": { "x": 0, "y": 3, "z": 8 }
+      }
+    ],
+    "truncated": false,
+    "max_nodes": 120,
+    "max_depth": 7,
+    "nodes": [
+      {
+        "path": "/root/Main3D",
+        "name": "Main3D",
+        "type": "Node3D",
+        "depth": 0,
+        "child_count": 2,
+        "scene_file_path": "res://scenes/main_3d.tscn",
+        "script_path": "",
+        "groups": [],
+        "process": {
+          "idle": false,
+          "physics": false
+        },
+        "transform_3d": {
+          "position": { "x": 0, "y": 0, "z": 0 },
+          "rotation": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 },
+          "global": {
+            "position": { "x": 0, "y": 0, "z": 0 },
+            "rotation_degrees": { "x": 0, "y": 0, "z": 0 },
+            "scale": { "x": 1, "y": 1, "z": 1 }
+          }
+        },
+        "visibility": {
+          "visible": true,
+          "visible_in_tree": true
+        },
+        "children": [
+          {
+            "path": "/root/Main3D/Player",
+            "name": "Player",
+            "type": "CharacterBody3D",
+            "depth": 1,
+            "child_count": 0,
+            "scene_file_path": "",
+            "script_path": "res://scripts/player.gd",
+            "groups": ["player"],
+            "process": {
+              "idle": true,
+              "physics": true
+            },
+            "transform_3d": {
+              "position": { "x": 1, "y": 0, "z": 3 },
+              "rotation": { "x": 0, "y": 0, "z": 0 },
+              "scale": { "x": 1, "y": 1, "z": 1 },
+              "global": {
+                "position": { "x": 1, "y": 0, "z": 3 },
+                "rotation_degrees": { "x": 0, "y": 0, "z": 0 },
+                "scale": { "x": 1, "y": 1, "z": 1 }
+              }
+            },
+            "visibility": {
+              "visible": true,
+              "visible_in_tree": true
+            },
+            "state": {
+              "kind": "CharacterBody3D",
+              "velocity": { "x": 0, "y": 0, "z": -2.5 },
+              "floor": true,
+              "wall": false,
+              "ceiling": false
+            },
+            "children": []
+          },
+          {
+            "path": "/root/Main3D/HUD",
+            "name": "HUD",
+            "type": "CanvasLayer",
+            "depth": 1,
+            "child_count": 0,
+            "scene_file_path": "",
+            "script_path": "",
+            "groups": [],
+            "process": {
+              "idle": false,
+              "physics": false
+            },
+            "visibility": {
+              "visible": true,
+              "visible_in_tree": true
+            },
+            "children": []
+          },
+          {
+            "path": "/root/Main3D/Camera3D",
+            "name": "Camera3D",
+            "type": "Camera3D",
+            "depth": 1,
+            "child_count": 0,
+            "scene_file_path": "",
+            "script_path": "",
+            "groups": [],
+            "process": {
+              "idle": false,
+              "physics": false
+            },
+            "visibility": {
+              "visible": true,
+              "visible_in_tree": true
+            },
+            "state": {
+              "kind": "Camera3D",
+              "current": true,
+              "fov": 75,
+              "near": 0.05,
+              "far": 4000
+            },
+            "children": []
+          },
+          {
+            "path": "/root/Main3D/SpawnTimer",
+            "name": "SpawnTimer",
+            "type": "Timer",
+            "depth": 1,
+            "child_count": 0,
+            "scene_file_path": "",
+            "script_path": "",
+            "groups": [],
+            "process": {
+              "idle": false,
+              "physics": false
+            },
+            "state": {
+              "kind": "Timer",
+              "stopped": false,
+              "time_left": 1.5,
+              "wait_time": 2,
+              "one_shot": false,
+              "paused": false
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "autoloads": {
+    "total": 1,
+    "sampled": [
+      {
+        "name": "GameState",
+        "resource_path": "res://scripts/game_state.gd",
+        "singleton": true,
+        "node_path": "/root/GameState",
+        "present_in_tree": true,
+        "type": "Node",
+        "script_path": "res://scripts/game_state.gd",
+        "scene_file_path": ""
+      }
+    ],
+    "truncated": false,
+    "max_autoloads": 40
+  },
+  "runtime": {
+    "paused": false,
+    "time_scale": 1,
+    "physics_ticks_per_second": 60,
+    "max_fps": 0,
+    "process_frames": 120,
+    "physics_frames": 118,
+    "frames_drawn": 119
+  },
+  "input": {
+    "total_actions": 9,
+    "sampled_actions": ["move_left", "move_right", "jump", "attack"],
+    "action_states": [
+      { "name": "move_left", "pressed": false, "strength": 0 },
+      { "name": "move_right", "pressed": true, "strength": 1 },
+      { "name": "jump", "pressed": false, "strength": 0 },
+      { "name": "attack", "pressed": false, "strength": 0 }
+    ],
+    "active_actions": ["move_right"],
+    "truncated": false,
+    "max_actions": 80
+  },
+  "metrics": {
+    "frames_per_second": 60,
+    "process_time": 0.004,
+    "physics_process_time": 0.002,
+    "object_count": 128,
+    "node_count": 42,
+    "orphan_node_count": 0
+  },
+  "observability": {
+    "level": "opt_in_runtime_probe",
+    "writer": "res://addons/godot_codex_bridge/runtime_state_probe.gd",
+    "arbitrary_script_execution": false,
+    "scene_mutation": false,
+    "scene_save": false
+  },
+  "privacy": {
+    "classification": "local_sensitive_runtime_evidence",
+    "external_upload_allowed": false
+  }
+}

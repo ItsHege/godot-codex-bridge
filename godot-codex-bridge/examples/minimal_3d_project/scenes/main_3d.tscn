@@ -1,0 +1,55 @@
+[gd_scene load_steps=6 format=3 uid="uid://godot_codex_bridge_main3d"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_main"]
+size = Vector3(2, 2, 2)
+
+[sub_resource type="Shader" id="Shader_validation"]
+code = "shader_type spatial;
+uniform float glow_strength = 0.25;
+uniform vec4 tint_color : source_color = vec4(0.3, 0.6, 1.0, 1.0);
+
+void fragment() {
+	ALBEDO = tint_color.rgb;
+	EMISSION = tint_color.rgb * glow_strength;
+}
+"
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_validation"]
+shader = SubResource("Shader_validation")
+shader_parameter/glow_strength = 0.25
+shader_parameter/tint_color = Color(0.3, 0.6, 1, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_main"]
+size = Vector3(2, 2, 2)
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 1
+background_color = Color(0.06, 0.08, 0.12, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.32, 0.42, 0.55, 1)
+ambient_light_energy = 0.45
+glow_enabled = true
+glow_intensity = 0.35
+tonemap_exposure = 1.0
+
+[node name="Main3D" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 2.5, 6)
+current = true
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.353553, 0.612372, 0, 0.866025, 0.5, -0.707107, -0.353553, 0.612372, 0, 4, 0)
+light_energy = 1.5
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_main")
+material_override = SubResource("ShaderMaterial_validation")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
+shape = SubResource("BoxShape3D_main")

@@ -1,0 +1,19 @@
+{
+  "manifest_version": "godot-codex-bridge/blender-import-manifest-v1",
+  "generated_at": "2026-06-23T12:00:00.000Z",
+  "source": "blender-mcp-export",
+  "assets": [
+    {
+      "asset_path": "res://assets/ai_imports/blender/tree_oak.glb",
+      "name": "TreeOak",
+      "position": { "x": 0, "y": 0, "z": 0 },
+      "rotationDegrees": { "y": 0 },
+      "scale": { "x": 1, "y": 1, "z": 1 }
+    },
+    {
+      "asset_path": "res://assets/ai_imports/blender/tree_oak_preview.png",
+      "name": "TreeOakPreview",
+      "position": { "x": 2, "y": 0, "z": 0 }
+    }
+  ]
+}

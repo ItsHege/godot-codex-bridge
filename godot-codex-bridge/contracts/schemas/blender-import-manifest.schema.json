@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://godot-codex-bridge.local/contracts/blender-import-manifest.schema.json",
+  "title": "Godot Codex Bridge Blender Import Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "generated_at", "source", "assets"],
+  "properties": {
+    "manifest_version": {
+      "const": "godot-codex-bridge/blender-import-manifest-v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 160
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "assets": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/asset" }
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_path"],
+      "properties": {
+        "asset_path": {
+          "type": "string",
+          "pattern": "^res://assets/ai_imports/blender/.+\\.(glb|gltf|obj|fbx|dae|blend|tscn|scn|res|tres|png)$",
+          "maxLength": 512
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_ -]*$"
+        },
+        "position": { "$ref": "#/$defs/vector3" },
+        "rotationDegrees": { "$ref": "#/$defs/vector3" },
+        "scale": { "$ref": "#/$defs/vector3" }
+      }
+    },
+    "vector3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      }
+    }
+  }
+}

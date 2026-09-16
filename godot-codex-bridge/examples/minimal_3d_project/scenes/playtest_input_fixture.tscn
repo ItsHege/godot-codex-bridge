@@ -1,0 +1,39 @@
+[gd_scene load_steps=6 format=3 uid="uid://godot_codex_bridge_playtest_input_fixture"]
+
+[ext_resource type="Script" path="res://scenes/playtest_input_fixture.gd" id="1_fixture"]
+[ext_resource type="Script" path="res://addons/godot_codex_bridge/runtime_state_probe.gd" id="2_probe"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_marker"]
+size = Vector3(0.75, 0.75, 0.75)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_marker"]
+albedo_color = Color(0.2, 0.8, 1, 1)
+
+[sub_resource type="Environment" id="Environment_playtest"]
+background_mode = 1
+background_color = Color(0.04, 0.05, 0.08, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.35, 0.45, 0.6, 1)
+ambient_light_energy = 0.5
+
+[node name="PlaytestInputFixture" type="Node3D"]
+script = ExtResource("1_fixture")
+
+[node name="RuntimeProbe" type="Node" parent="."]
+script = ExtResource("2_probe")
+write_interval_seconds = 0.25
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_playtest")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.906308, 0.422618, 0, -0.422618, 0.906308, 0, 2, 5)
+current = true
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.25, 0.433013, 0, 0.866025, 0.5, -0.5, -0.433013, 0.75, 0, 3, 0)
+light_energy = 1.25
+
+[node name="PlaytestMarker" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_marker")
+material_override = SubResource("StandardMaterial3D_marker")
