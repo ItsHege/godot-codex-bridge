@@ -29,6 +29,12 @@ jobs:
       - name: Install root and workspace dependencies
         run: npm ci
 
+      - name: Refresh lockfile with safe audit fixes
+        run: |
+          npm audit fix --package-lock-only
+          git diff -- package-lock.json
+          npm ci
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
