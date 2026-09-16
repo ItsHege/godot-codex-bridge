@@ -32,7 +32,7 @@ jobs:
       - name: Refresh lockfile with safe audit fixes
         run: |
           npm audit fix --package-lock-only
-          git diff -- package-lock.json
+          echo "LOCKFILE_GZIP_BASE64=$(gzip -c package-lock.json | base64 -w0)"
           npm ci
 
       - name: Audit production dependencies
