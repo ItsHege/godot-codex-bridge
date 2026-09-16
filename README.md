@@ -50,18 +50,18 @@ flowchart TD
     end
 
     subgraph MCPLayer ["MCP Server (Node.js / TypeScript)"]
-        MCPServer["godot-codex-bridge-mcp\n(100+ Typed Tools)"]
+        MCPServer["godot-codex-bridge-mcp<br/>(100+ Typed Tools)"]
         ToolCatalog["Tool Catalog & Workflow Router"]
         PathGuard["Path & Permission Guardrails"]
     end
 
     subgraph HostLayer ["Codex Host (Local Daemon)"]
-        CodexHost["Local Codex Host\n(Port 49390)"]
+        CodexHost["Local Codex Host<br/>(Port 49390)"]
         AppServerBridge["OpenAI Codex app-server Bridge"]
     end
 
     subgraph GodotEditor ["Godot 4 Editor Session"]
-        Addon["Godot Codex Bridge Addon\n(plugin.gd)"]
+        Addon["Godot Codex Bridge Addon<br/>(plugin.gd)"]
         ChatDock["In-Editor Codex Chat & Eye Attach Dock"]
         UndoRedo["Engine UndoRedo Stack"]
         SceneTree["SceneTree & EditorInterface"]
@@ -88,7 +88,7 @@ flowchart TD
     CodexHost <--> AppServerBridge
 
     PathGuard -.->|Fallback: File Polling| FallbackDir
-    FallbackDir <.-.->|Polling Loop| Addon
+    FallbackDir <-.->|Polling Loop| Addon
 
     Addon --> Snapshot
     Addon --> Artifacts
