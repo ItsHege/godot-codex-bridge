@@ -29,19 +29,6 @@ jobs:
       - name: Install root and workspace dependencies
         run: npm ci
 
-      - name: Refresh lockfile with safe audit fixes
-        run: |
-          npm audit fix --package-lock-only
-          npm ci
-
-      - name: Upload refreshed lockfile
-        if: matrix.node-version == '22.x'
-        uses: actions/upload-artifact@v4
-        with:
-          name: refreshed-package-lock
-          path: package-lock.json
-          retention-days: 1
-
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
