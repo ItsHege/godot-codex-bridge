@@ -13,6 +13,11 @@ const ONE_BY_ONE_PNG = Buffer.from(
   "base64",
 );
 
+// The addon response timeout starts only after async validation/status checks
+// finish and BridgeClient writes the request. Keep the test observer's budget
+// independent so slow hosted-runner I/O cannot be mistaken for no request.
+const REQUEST_WRITE_OBSERVER_TIMEOUT_MS = 5_000;
+
 test("createGodotCodexBridgeServer registers without throwing", async () => {
   const config = await makeConfig();
   const server = createGodotCodexBridgeServer(config);
@@ -1975,7 +1980,7 @@ test("on-demand introspection tools write editor_control requests and validate i
   assert.equal((badClass.structuredContent?.error as { code?: string })?.code, "invalid_node_class");
 });
 
-test("resource lifecycle tools write editor_control requests and validate inputs", async () => {
+test("resource lifecycle tools write editor_control requests and validate inputs", async (t) => {
   const config = await makeConfig();
   await fs.mkdir(path.join(config.projectRoot, "materials"), { recursive: true });
   await fs.writeFile(path.join(config.projectRoot, "materials", "test_material.tres"), "[gd_resource type=\"StandardMaterial3D\" format=3]\n", "utf8");
@@ -1986,6 +1991,20 @@ test("resource lifecycle tools write editor_control requests and validate inputs
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
+  const resourcePath = path.join(config.projectRoot, "materials", "test_material.tres");
+  const originalAccess = fs.access.bind(fs);
+  let delayedResourceValidation = false;
+  t.mock.method(fs, "access", async (
+    target: Parameters<typeof fs.access>[0],
+    mode?: Parameters<typeof fs.access>[1],
+  ) => {
+    if (!delayedResourceValidation && path.resolve(String(target)) === path.resolve(resourcePath)) {
+      delayedResourceValidation = true;
+      await new Promise((resolve) => setTimeout(resolve, 1_250));
+    }
+    return originalAccess(target, mode);
+  });
+
   const assignPending = handlers["godot.assign_resource_to_node"]({
     nodePath: "MeshInstance3D",
     property: "material_override",
@@ -1993,6 +2012,8 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     timeoutMs: 1_000,
   });
   let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
+  t.mock.restoreAll();
+  assert.equal(delayedResourceValidation, true);
   let request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
     request_id: string;
     type: string;
@@ -2652,7 +2673,7 @@ async function makeConfig(): Promise<ServerConfig> {
 }
 
 async function waitForRequest(requestsDir: string): Promise<string> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + REQUEST_WRITE_OBSERVER_TIMEOUT_MS;
   while (Date.now() <= deadline) {
     try {
       const entries = await fs.readdir(requestsDir);
@@ -2669,7 +2690,7 @@ async function waitForRequest(requestsDir: string): Promise<string> {
 }
 
 async function waitForNewestRequest(requestsDir: string, previousRequestId: string): Promise<string> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + REQUEST_WRITE_OBSERVER_TIMEOUT_MS;
   while (Date.now() <= deadline) {
     try {
       const entries = await fs.readdir(requestsDir);
@@ -2686,7 +2707,7 @@ async function waitForNewestRequest(requestsDir: string, previousRequestId: stri
 }
 
 async function waitForEditorControlAction(requestsDir: string, action: string, previousRequestId?: string): Promise<string> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + REQUEST_WRITE_OBSERVER_TIMEOUT_MS;
   while (Date.now() <= deadline) {
     try {
       const entries = (await fs.readdir(requestsDir)).filter((entry) => entry.endsWith(".json")).sort();
