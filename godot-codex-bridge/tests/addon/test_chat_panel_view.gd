@@ -36,7 +36,8 @@ func _run() -> void:
 	_assert_eq((assembled_status.get("row") as HBoxContainer).get_parent(), assembled_panel, "assembled status row parent")
 	_assert_eq(assembled_advanced.get_parent(), assembled_panel, "assembled advanced parent")
 	_assert_eq(((panel_controls.get("meta", {}) as Dictionary).get("row") as HBoxContainer).get_parent(), assembled_advanced, "assembled meta parent")
-	_assert_eq(((panel_controls.get("toolbar", {}) as Dictionary).get("row") as HBoxContainer).get_parent(), assembled_advanced, "assembled toolbar parent")
+	_assert_eq(((panel_controls.get("toolbar", {}) as Dictionary).get("row") as HBoxContainer).get_parent(), assembled_panel, "assembled toolbar remains outside Advanced")
+	_assert_eq(((panel_controls.get("toolbar", {}) as Dictionary).get("advanced_row") as HBoxContainer).get_parent(), assembled_advanced, "secondary toolbar stays in Advanced")
 	_assert_eq(((panel_controls.get("runtime", {}) as Dictionary).get("row") as HBoxContainer).get_parent(), assembled_advanced, "assembled runtime parent")
 	_assert_eq(((panel_controls.get("attachment", {}) as Dictionary).get("row") as HBoxContainer).get_parent(), assembled_advanced, "assembled attachment parent")
 	_assert_eq(((assembled_team.get("row") as HBoxContainer).get_parent()), assembled_advanced, "assembled team row parent")
@@ -45,13 +46,15 @@ func _run() -> void:
 	_assert_eq((assembled_log.get("frame") as Control).get_parent(), assembled_panel, "assembled log parent")
 	_assert_eq((assembled_approval.get("panel") as VBoxContainer).get_parent(), assembled_panel, "assembled approval parent")
 	_assert_eq((assembled_input.get("row") as VBoxContainer).get_parent(), assembled_panel, "assembled input parent")
-	_assert_eq(assembled_panel.get_child(2), assembled_annotation.get("row") as HBoxContainer, "assembled annotation order")
-	_assert_eq(assembled_panel.get_child(3), assembled_log.get("frame") as Control, "assembled log order")
-	_assert_eq(assembled_panel.get_child(4), assembled_approval.get("panel") as VBoxContainer, "assembled approval order")
-	_assert_eq(assembled_panel.get_child(5), assembled_input.get("row") as VBoxContainer, "assembled input order")
+	_assert_eq(assembled_panel.get_child(3), (panel_controls.get("toolbar", {}) as Dictionary).get("row") as HBoxContainer, "assembled toolbar order")
+	_assert_eq(assembled_panel.get_child(4), assembled_annotation.get("row") as HBoxContainer, "assembled annotation order")
+	_assert_eq(assembled_panel.get_child(5), assembled_log.get("frame") as Control, "assembled log order")
+	_assert_eq(assembled_panel.get_child(6), assembled_approval.get("panel") as VBoxContainer, "assembled approval order")
+	_assert_eq(assembled_panel.get_child(7), assembled_input.get("row") as VBoxContainer, "assembled input order")
 	var refs := ChatPanelView.control_refs(panel_controls)
 	_assert_eq(refs.get("panel"), assembled_panel, "refs panel")
 	_assert_eq(refs.get("status_dot"), assembled_status.get("status_dot"), "refs status dot")
+	_assert_eq(refs.get("build_label"), assembled_status.get("build_label"), "refs build label")
 	_assert_eq(refs.get("advanced_panel"), assembled_advanced, "refs advanced panel")
 	_assert_eq(refs.get("new_button"), (panel_controls.get("meta", {}) as Dictionary).get("new_button"), "refs new button")
 	_assert_eq(refs.get("connect_button"), (panel_controls.get("status", {}) as Dictionary).get("connect_button"), "refs connect button")
@@ -74,17 +77,22 @@ func _run() -> void:
 	var header_row := header_controls.get("row") as HBoxContainer
 	var header_dot := header_controls.get("status_dot") as ColorRect
 	var header_status := header_controls.get("status_label") as Label
+	var header_build := header_controls.get("build_label") as Label
 	var header_connect := header_controls.get("connect_button") as Button
 	var header_advanced := header_controls.get("advanced_toggle") as CheckButton
+	var header_trust := header_controls.get("trust_indicator") as Label
 	_assert_true(header_row is HBoxContainer, "header row type")
 	_assert_eq(header_dot.color, ChatStatusModel.COLOR_OK, "header dot color")
 	_assert_eq(header_status.get_parent(), header_row, "header status parent")
+	_assert_eq(header_build.get_parent(), header_row, "header build parent")
+	_assert_eq(header_build.text, "Addon: unmanaged", "header build has honest default")
 	_assert_eq(header_connect.get_parent(), header_row, "header connect parent")
 	_assert_eq(header_connect.text, "Connect", "header connect text")
 	_assert_true(header_connect.visible, "header connect visible")
 	_assert_eq(header_connect.focus_mode, Control.FOCUS_ALL, "header connect keyboard focus")
 	_assert_eq(header_advanced.text, "Advanced", "header advanced text")
 	_assert_eq(header_advanced.focus_mode, Control.FOCUS_ALL, "header advanced keyboard focus")
+	_assert_false(header_trust.visible, "trust indicator hidden while trust is off")
 
 	var meta_controls := ChatPanelView.create_meta_controls()
 	var meta_row := meta_controls.get("row") as HBoxContainer
@@ -103,15 +111,18 @@ func _run() -> void:
 
 	var toolbar_controls := ChatPanelView.create_toolbar_controls()
 	var toolbar_row := toolbar_controls.get("row") as HBoxContainer
+	var toolbar_advanced_row := toolbar_controls.get("advanced_row") as HBoxContainer
 	var cancel_button := toolbar_controls.get("cancel_button") as Button
 	var emergency_stop_button := toolbar_controls.get("emergency_stop_button") as Button
 	var enable_tools_button := toolbar_controls.get("enable_tools_button") as Button
 	_assert_false(toolbar_controls.has("connect_button"), "advanced toolbar does not duplicate primary connect button")
 	_assert_eq(cancel_button.get_parent(), toolbar_row, "cancel button parent")
-	_assert_eq(cancel_button.text, "Cancel", "cancel button text")
+	_assert_eq(cancel_button.text, "Stop", "foreground stop button text")
 	_assert_eq(emergency_stop_button.text, "Stop All", "emergency stop button text")
+	_assert_eq(emergency_stop_button.get_parent(), toolbar_advanced_row, "emergency stop remains advanced")
 	_assert_true(emergency_stop_button.tooltip_text.contains("Emergency stop"), "emergency stop button tooltip")
 	_assert_eq(enable_tools_button.text, "Enable Tools", "enable tools button text")
+	_assert_eq(enable_tools_button.get_parent(), toolbar_advanced_row, "tool refresh remains advanced")
 
 	var runtime_controls := ChatPanelView.create_runtime_controls()
 	var runtime_row := runtime_controls.get("row") as HBoxContainer
@@ -155,7 +166,7 @@ func _run() -> void:
 	var input_box := input_controls.get("input") as TextEdit
 	var send_button := input_controls.get("send_button") as Button
 	var input_toggle := input_controls.get("composer_toggle_button") as Button
-	_assert_eq(input_controls_row.custom_minimum_size.y, 294.0, "input controls row min height")
+	_assert_eq(input_controls_row.custom_minimum_size.y, 122.0, "input controls row min height")
 	_assert_eq(input_box.get_parent(), input_controls_row, "input box parent")
 	_assert_eq(input_buttons_row.get_parent(), input_controls_row, "input buttons row parent")
 	_assert_eq(eye_button.get_parent(), input_buttons_row, "eye button parent")
@@ -218,7 +229,7 @@ func _run() -> void:
 	_assert_true(input.placeholder_text.contains("Enter to send"), "input placeholder explains enter")
 	_assert_true(input.has_signal("chat_enter_action"), "input emits chat enter actions")
 	_assert_true(input.has_method("handle_key_event"), "input owns live key handling")
-	_assert_eq(input.custom_minimum_size.y, 260.0, "input min height")
+	_assert_eq(input.custom_minimum_size.y, 88.0, "input defaults to a compact multiline height")
 	_assert_eq(input.size_flags_vertical, Control.SIZE_EXPAND_FILL, "input keeps multiline vertical allocation")
 	_assert_eq(input.wrap_mode, TextEdit.LINE_WRAPPING_BOUNDARY, "input wraps")
 	_assert_false(input.scroll_fit_content_height, "input keeps stable multiline height")
@@ -265,18 +276,18 @@ func _run() -> void:
 	var composer_toggle := ChatPanelView.create_composer_toggle_button()
 	_assert_eq(composer_toggle.text, "Expand", "composer toggle starts collapsed")
 	ChatPanelView.apply_composer_expanded(input_row, input, composer_toggle, true)
-	_assert_eq(input.custom_minimum_size.y, 420.0, "expanded input height")
-	_assert_eq(input_row.custom_minimum_size.y, 454.0, "expanded row height")
+	_assert_eq(input.custom_minimum_size.y, 220.0, "expanded input height")
+	_assert_eq(input_row.custom_minimum_size.y, 254.0, "expanded row height")
 	_assert_eq(composer_toggle.text, "Collapse", "composer toggle expanded text")
 	ChatPanelView.apply_composer_expanded(input_row, input, composer_toggle, false)
-	_assert_eq(input.custom_minimum_size.y, 260.0, "collapsed input height")
-	_assert_eq(input_row.custom_minimum_size.y, 294.0, "collapsed row height")
+	_assert_eq(input.custom_minimum_size.y, 88.0, "collapsed input height")
+	_assert_eq(input_row.custom_minimum_size.y, 122.0, "collapsed row height")
 	_assert_eq(composer_toggle.text, "Expand", "composer toggle collapsed text")
 	ChatPanelView.apply_composer_height(input_row, input, composer_toggle, 260, false)
-	_assert_eq(input.custom_minimum_size.y, 260.0, "auto input height")
+	_assert_eq(input.custom_minimum_size.y, 260.0, "explicit auto input height")
 	_assert_eq(input_row.custom_minimum_size.y, 294.0, "auto row height")
 	_assert_eq(composer_toggle.text, "Expand", "auto height keeps manual toggle collapsed")
-	_assert_true(input.get_combined_minimum_size().y >= 260.0, "auto input combined minimum size refreshes")
+	_assert_true(input.get_combined_minimum_size().y >= 88.0, "auto input combined minimum size refreshes")
 	_assert_true(input_row.get_combined_minimum_size().y >= 294.0, "auto row combined minimum size refreshes")
 
 	var advanced := ChatPanelView.create_advanced_panel()
@@ -300,6 +311,7 @@ func _run() -> void:
 	var scroll := log_controls.get("scroll") as ScrollContainer
 	var message_list := log_controls.get("message_list") as VBoxContainer
 	var bottom_spacer := log_controls.get("bottom_spacer") as Control
+	var jump_latest_button := log_controls.get("jump_latest_button") as Button
 	_assert_true(frame.clip_contents, "log frame clips contents")
 	_assert_eq(frame.custom_minimum_size.y, 48.0, "log frame min height")
 	_assert_eq(scroll.get_parent(), frame, "scroll is inside frame")
@@ -307,6 +319,8 @@ func _run() -> void:
 	_assert_eq(scroll.vertical_scroll_mode, ScrollContainer.SCROLL_MODE_SHOW_ALWAYS, "vertical scroll always visible")
 	_assert_eq(message_list.get_parent(), scroll, "message list inside scroll")
 	_assert_eq(bottom_spacer.get_parent(), message_list, "bottom spacer inside message list")
+	_assert_eq(jump_latest_button.get_parent(), frame, "jump latest button overlays the log frame")
+	_assert_false(jump_latest_button.visible, "jump latest hidden while following")
 
 	var approval_controls := ChatPanelView.create_approval_controls()
 	var approval_panel := approval_controls.get("panel") as VBoxContainer
@@ -335,27 +349,31 @@ func _run() -> void:
 	var layout_header := Label.new()
 	layout_header.text = "Header"
 	var layout_advanced := ChatPanelView.create_advanced_panel()
+	var layout_toolbar := ChatPanelView.create_toolbar_controls().get("row") as HBoxContainer
 	var layout_input := ChatPanelView.create_input_controls().get("row") as VBoxContainer
 	var layout_annotation := ChatPanelView.create_annotation_controls().get("row") as HBoxContainer
 	var layout_log := ChatPanelView.create_log_controls().get("frame") as Control
 	var layout_approval := ChatPanelView.create_approval_controls().get("panel") as VBoxContainer
 	layout_panel.add_child(layout_header)
 	layout_panel.add_child(layout_advanced)
+	layout_panel.add_child(layout_toolbar)
 	layout_panel.add_child(layout_input)
 	layout_panel.add_child(layout_annotation)
 	layout_panel.add_child(layout_log)
 	ChatPanelView.arrange_chat_panel_sections(
 		layout_panel,
 		layout_advanced,
+		layout_toolbar,
 		layout_annotation,
 		layout_log,
 		layout_approval,
 		layout_input
 	)
-	_assert_eq(layout_panel.get_child(2), layout_annotation, "annotation follows advanced")
-	_assert_eq(layout_panel.get_child(3), layout_log, "log follows annotation")
-	_assert_eq(layout_panel.get_child(4), layout_approval, "approval follows log")
-	_assert_eq(layout_panel.get_child(5), layout_input, "input follows approval")
+	_assert_eq(layout_panel.get_child(2), layout_toolbar, "foreground toolbar follows advanced")
+	_assert_eq(layout_panel.get_child(3), layout_annotation, "annotation follows toolbar")
+	_assert_eq(layout_panel.get_child(4), layout_log, "log follows annotation")
+	_assert_eq(layout_panel.get_child(5), layout_approval, "approval follows log")
+	_assert_eq(layout_panel.get_child(6), layout_input, "input follows approval")
 
 	panel.free()
 	assembled_panel.free()
@@ -364,6 +382,7 @@ func _run() -> void:
 	meta_row.free()
 	working.free()
 	toolbar_row.free()
+	toolbar_advanced_row.free()
 	runtime_row.free()
 	attachment_row.free()
 	team_row.free()

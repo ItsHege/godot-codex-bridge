@@ -18,6 +18,6 @@
     "validate:addon-core": "npm --prefix godot-codex-bridge run validate:addon-core"
   },
   "engines": {
-    "node": ">=20.11"
+    "node": ">=22.14"
   }
 }

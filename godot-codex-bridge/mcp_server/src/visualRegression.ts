@@ -25,33 +25,19 @@ interface DecodedPng {
 }
 
 export async function createVisualBaseline(
-  bridgeDir: string,
-  options: { screenshotPath: string; baselineName?: string },
+  _bridgeDir: string,
+  _options: { screenshotPath: string; baselineName?: string },
 ): Promise<ToolEnvelope> {
-  const source = await validatePngPath(options.screenshotPath);
-  if (!isValidatedPng(source)) {
-    return source;
-  }
-
-  const baselineName = safeName(options.baselineName ?? path.basename(source.path, ".png"));
-  const baselineRoot = path.join(bridgeDir, "artifacts", "visual_regression", "baselines", baselineName);
-  await fs.mkdir(baselineRoot, { recursive: true });
-
-  const baselinePath = path.join(baselineRoot, "baseline.png");
-  await fs.copyFile(source.path, baselinePath);
-  const metadata = await pngMetadata(baselinePath);
-  const manifest = {
-    status: "ok" as const,
-    visual_regression_version: "godot-codex-bridge/visual-regression-v1",
-    baseline_name: baselineName,
-    created_at: new Date().toISOString(),
-    source_path: source.path,
-    baseline_path: baselinePath,
-    metadata,
+  return {
+    status: "bridge_unavailable",
+    created: false,
+    mitigation: "operation_disabled",
+    error: {
+      code: "trusted_screenshot_permission_unavailable",
+      message:
+        "Visual baseline creation is disabled until the MCP server can verify live screenshot permission and project-confined source provenance.",
+    },
   };
-  const manifestPath = path.join(baselineRoot, "manifest.json");
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  return { ...manifest, manifest_path: manifestPath };
 }
 
 export async function compareVisualRegression(

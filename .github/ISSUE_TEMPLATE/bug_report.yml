@@ -66,9 +66,9 @@ body:
       label: Environment Information
       description: Details about your local setup.
       value: |
-        - Godot Version: (e.g. 4.3 stable, 4.4, 4.7)
+        - Godot Version: (exact version; tested baseline 4.7.1)
         - Operating System: (e.g. Windows 11, Ubuntu 24.04, macOS Sonoma)
-        - Node.js Version: (e.g. 20.11.0, 22.x)
+        - Node.js Version: (e.g. 22.x, 24.x)
         - Client / Agent: (e.g. OpenAI Codex CLI, Claude Desktop, Cursor, Antigravity)
     validations:
       required: true

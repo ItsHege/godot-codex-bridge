@@ -2,12 +2,14 @@
 extends RefCounted
 
 const ChatDiffModel := preload("chat_diff_model.gd")
+const ChatApprovalModel := preload("chat_approval_model.gd")
 
 
 static func classify_event(method: String, params: Dictionary, current_state: Dictionary = {}) -> Dictionary:
 	var current_runtime := str(current_state.get("runtime_state", "ready"))
 	var current_thread := str(current_state.get("thread_id", ""))
 	var current_turn := str(current_state.get("turn_id", ""))
+	var active_approval := current_state.get("approval", {}) as Dictionary
 	var event := {
 		"method": method,
 		"known": true,
@@ -53,6 +55,9 @@ static func classify_event(method: String, params: Dictionary, current_state: Di
 			event["clear_turn"] = true
 			event["reset_stream_state"] = true
 			event["system_message"] = "Codex response stopped."
+			if ChatApprovalModel.interrupted_turn_matches(active_approval, params):
+				event["clear_approval"] = true
+				event["approval_clear_message"] = "Approval cancelled because the Codex turn was interrupted."
 		"turn.completed":
 			event["flush_assistant"] = true
 			event["clear_turn"] = true
@@ -63,13 +68,17 @@ static func classify_event(method: String, params: Dictionary, current_state: Di
 			event["runtime_state"] = "waiting_for_approval"
 			event["show_approval"] = true
 		"approval.expired":
-			event["runtime_state"] = "ready"
-			event["clear_approval"] = true
-			event["approval_clear_message"] = "Approval expired; files left unchanged."
+			if ChatApprovalModel.resolution_matches(active_approval, params):
+				event["clear_approval"] = true
+				event["approval_clear_message"] = ChatApprovalModel.resolution_message(method, params)
+			else:
+				event["update_ui"] = false
 		"approval.resolved":
-			event["runtime_state"] = "ready"
-			event["clear_approval"] = true
-			event["approval_clear_message"] = "Approval resolved: " + str(params.get("decision", "unknown"))
+			if ChatApprovalModel.resolution_matches(active_approval, params):
+				event["clear_approval"] = true
+				event["approval_clear_message"] = ChatApprovalModel.resolution_message(method, params)
+			else:
+				event["update_ui"] = false
 		"background.updated":
 			event["background_update"] = true
 		"runtime.warning":
@@ -87,24 +96,29 @@ static func classify_event(method: String, params: Dictionary, current_state: Di
 
 static func classify_turn_event(params: Dictionary) -> Dictionary:
 	var event_name := str(params.get("event", ""))
+	var identity := {
+		"event_id": str(params.get("event_id", params.get("notification_id", ""))),
+		"item_id": str(params.get("item_id", "")),
+		"turn_id": str(params.get("turn_id", "")),
+		"thread_id": str(params.get("thread_id", "")),
+	}
 	match event_name:
 		"agent_message_delta":
-			return {
+			return identity.merged({
 				"action": "assistant_delta",
 				"text": str(params.get("text", "")),
-				"item_id": str(params.get("item_id", "")),
 				"phase": str(params.get("phase", "")),
-			}
+			}, true)
 		"diff_updated":
-			return {
+			return identity.merged({
 				"action": "diff_updated",
 				"diff_text": ChatDiffModel.diff_text_from_event_params(params),
-			}
+			}, true)
 		_:
-			return {
+			return identity.merged({
 				"action": "detail",
 				"message": str(params),
-			}
+			}, true)
 
 
 static func turn_event_handler_plan(params: Dictionary) -> Dictionary:
@@ -117,6 +131,8 @@ static func turn_event_handler_plan(params: Dictionary) -> Dictionary:
 				"text": str(turn_event.get("text", "")),
 				"item_id": str(turn_event.get("item_id", "")),
 				"phase": str(turn_event.get("phase", "")),
+				"event_id": str(turn_event.get("event_id", "")),
+				"turn_id": str(turn_event.get("turn_id", "")),
 			})
 		"diff_updated":
 			var diff_text := str(turn_event.get("diff_text", ""))
@@ -124,6 +140,9 @@ static func turn_event_handler_plan(params: Dictionary) -> Dictionary:
 				effects.append({
 					"action": "diff_updated",
 					"diff_text": diff_text,
+					"event_id": str(turn_event.get("event_id", "")),
+					"item_id": str(turn_event.get("item_id", "")),
+					"turn_id": str(turn_event.get("turn_id", "")),
 				})
 		_:
 			effects.append({

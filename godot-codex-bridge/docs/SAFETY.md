@@ -15,6 +15,20 @@ optional intent-matched workflow recommendations. It does not inspect project
 files, contact the live addon, run Godot, mutate scenes or weaken any
 approval/permission gate.
 
+## Local Host Transport
+
+Codex Host binds only to numeric loopback (`127.0.0.1` or `::1`). Its HTTP and
+WebSocket endpoints reject browser Origin/Fetch Metadata headers and unexpected
+Host names; WebSocket frames are limited to 1 MiB. It is native local IPC, not
+a browser API or a remotely accessible service. Do not expose it using tunnels
+or proxies. These checks do not authenticate other native processes running
+under the same machine trust boundary.
+
+The Codex app-server connection is a separate local transport; its WebSocket
+mode is experimental. Actual Codex turns use the user's configured provider
+and may transmit the prompt, attached images and selected context. Local
+artifact storage is not a promise that requested AI inference stays offline.
+
 ## Private Project Data
 
 Godot projects can contain private art, unreleased code, paid assets, asset
@@ -111,11 +125,12 @@ Approved write flow:
 proposal -> diff preview -> undo/snapshot plan -> explicit approval -> apply -> validation
 ```
 
-`godot.apply_approved_diff` is intentionally narrow. It requires the explicit
-approval token `APPROVE_GODOT_CODEX_BRIDGE_APPLY`, validates the project-relative
-target path, optionally checks `expectedCurrentSha256` for drift, creates an undo
-snapshot before replacing existing files, and never runs arbitrary shell
-commands. New files require `allowCreate: true`.
+`godot.apply_approved_diff` is temporarily disabled and fails closed. The prior
+public token was not evidence of a trusted human decision and has been retired.
+Direct application must remain unavailable until a Host/UI-issued receipt is
+short-lived, single-use, and bound to the canonical project, operation, target,
+reviewed current state, and proposed content. Diff preview and explicit
+user-controlled application remain available.
 
 ## Arbitrary Command And File-Write Review Checklist
 
@@ -252,11 +267,10 @@ tabs such as Output, Debugger, Audio, Animation or Shader Editor through the
 editor control tree, but it must not delete, clear, acknowledge, or rewrite
 diagnostics. Missing tabs must return a structured not-found error.
 
-Automated validation uses a narrow `set_bridge_permission` request with token
-`GCB_VALIDATE_PERMISSION_TOGGLE` to simulate pressing local permission
-checkboxes in a controlled fixture editor. It exists for smoke tests such as
-`npm run validate:live-mutation`; normal MCP tools do not expose it as a public
-Godot capability.
+The production request dispatcher does not expose a permission-mutation helper.
+Validation must configure permissions outside the production request channel in
+an isolated fixture before starting the editor, then verify and restore fixture
+state without changing a real project.
 
 ## Scene Generation
 
@@ -277,11 +291,13 @@ geometry.
 
 ## Visual Regression
 
-`godot.create_visual_baseline` and `godot.compare_visual_regression` operate on
-local PNG screenshots only. They store and compare baseline metadata under the
-project-local bridge artifact directory. Current v1 comparison uses PNG
-signature, dimensions, byte size, SHA-256 and pixel diff for matching-dimension
-non-interlaced 8-bit PNGs. It does not upload screenshots.
+`godot.create_visual_baseline` is temporarily disabled because the MCP process
+cannot yet verify live screenshot permission and project-confined source
+provenance. `godot.compare_visual_regression` remains available for local PNGs;
+its unconstrained input path is tracked for physical-path confinement work.
+Current v1 comparison uses PNG signature, dimensions, byte size, SHA-256 and
+pixel diff for matching-dimension non-interlaced 8-bit PNGs. It does not upload
+screenshots.
 
 `godot.capture_timeline_screenshots` is also local-only screenshot evidence. It
 orchestrates a small sequence of normal addon viewport screenshot requests and

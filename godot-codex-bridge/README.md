@@ -54,12 +54,14 @@ without replacing the Godot editor.
   `export_presets.cfg` without running exports.
 - Create local undo snapshot artifacts for explicitly listed project-relative
   scene/script/resource files before risky edits.
-- Create visual-regression baselines and compare current screenshots by
-  dimensions, byte size, SHA-256 and supported PNG pixel diff.
+- Compare existing visual-regression screenshots by dimensions, byte size,
+  SHA-256 and supported PNG pixel diff. Baseline creation currently fails
+  closed pending trusted screenshot permission and source provenance.
 - Convert scene prompts into bounded live-editor action plans without writing
   generated `.tscn` templates or applying default geometry.
-- Apply approved text diffs and narrow selected-node fixes only behind explicit
-  approval tokens and safety gates.
+- Preview text diffs and perform narrow selected-node fixes behind their safety
+  gates. Direct MCP diff application currently fails closed pending trusted,
+  exact-bound approval receipts.
 
 ## Not In MVP
 
@@ -141,9 +143,9 @@ npm run doctor
    the addon. Keep the project root allowlist narrow.
 
 6. Use `godot.bridge_status` first, then MCP tools for inspection and evidence
-   gathering. Use `godot.preview_scene_diff` for review-first edits; use
-   approved write tools only with their explicit approval tokens and undo
-   evidence.
+   gathering. Use `godot.preview_scene_diff` for review-first evidence. Direct
+   MCP diff application remains disabled until trusted receipts are available;
+   other write tools retain their documented permission and undo requirements.
 
    Before adding or approving any new command, file-write, save, export, import
    or external-project mutation path, use the review checklist in

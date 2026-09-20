@@ -4,6 +4,8 @@ param(
 
   [string] $SourceAddon = "",
 
+  [string] $ChannelManifest = "",
+
   [switch] $Apply,
   [switch] $Replace,
   [switch] $SimulateFailureAfterBackupForTest,
@@ -35,6 +37,18 @@ function Get-PluginCfgVersion([string] $PluginCfgPath) {
   return $null
 }
 
+function Read-JsonHashtable([string] $PathValue) {
+  if ([string]::IsNullOrWhiteSpace($PathValue) -or -not (Test-Path -LiteralPath $PathValue)) {
+    return @{}
+  }
+  $parsed = Get-Content -Raw -LiteralPath $PathValue | ConvertFrom-Json
+  $result = @{}
+  foreach ($property in $parsed.PSObject.Properties) {
+    $result[$property.Name] = $property.Value
+  }
+  return $result
+}
+
 function Get-FileAgeMs([string] $PathValue) {
   if (-not (Test-Path -LiteralPath $PathValue)) {
     return $null
@@ -62,7 +76,7 @@ function Get-Sha256Hex([string] $PathValue) {
   }
 }
 
-function Get-AddonFileMap([string] $Root, [string] $ExcludedRelativePath = "") {
+function Get-AddonFileMap([string] $Root, [string[]] $ExcludedRelativePaths = @()) {
   $map = @{}
   if (-not (Test-Path -LiteralPath $Root)) {
     return $map
@@ -70,7 +84,10 @@ function Get-AddonFileMap([string] $Root, [string] $ExcludedRelativePath = "") {
   $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd("\")
   foreach ($file in (Get-ChildItem -LiteralPath $rootFull -Recurse -File)) {
     $relative = $file.FullName.Substring($rootFull.Length).TrimStart("\")
-    if ($ExcludedRelativePath -ne "" -and $relative -ieq $ExcludedRelativePath) {
+    if ($relative.EndsWith(".uid", [System.StringComparison]::OrdinalIgnoreCase)) {
+      continue
+    }
+    if ($ExcludedRelativePaths -icontains $relative) {
       continue
     }
     $map[$relative] = $file.FullName
@@ -79,8 +96,9 @@ function Get-AddonFileMap([string] $Root, [string] $ExcludedRelativePath = "") {
 }
 
 function Get-AddonChangePreview([string] $SourceRoot, [string] $TargetRoot) {
-  $sourceMap = Get-AddonFileMap $SourceRoot
-  $targetMap = Get-AddonFileMap $TargetRoot "host_config.json"
+  $generatedFiles = @("host_config.json", "install_manifest.json")
+  $sourceMap = Get-AddonFileMap $SourceRoot $generatedFiles
+  $targetMap = Get-AddonFileMap $TargetRoot $generatedFiles
   $added = New-Object System.Collections.Generic.List[string]
   $changed = New-Object System.Collections.Generic.List[string]
   $removed = New-Object System.Collections.Generic.List[string]
@@ -164,11 +182,21 @@ $resolvedSourceAddon = if ($SourceAddon -ne "") {
 } else {
   Join-Path $productRootPath "addons\godot_codex_bridge"
 }
+$resolvedChannelManifest = if ($ChannelManifest -ne "") {
+  Resolve-FullPath $ChannelManifest (Get-Location).Path
+} else {
+  ""
+}
+$channelManifestData = Read-JsonHashtable $resolvedChannelManifest
+if ($resolvedChannelManifest -ne "" -and $channelManifestData.Count -eq 0) {
+  throw "GC-work channel manifest is missing or invalid: $resolvedChannelManifest"
+}
 
 $projectFile = Join-Path $resolvedProjectRoot "project.godot"
 $targetAddon = Join-Path $resolvedProjectRoot "addons\godot_codex_bridge"
 $targetPluginCfg = Join-Path $targetAddon "plugin.cfg"
 $targetHostConfig = Join-Path $targetAddon "host_config.json"
+$targetInstallManifest = Join-Path $targetAddon "install_manifest.json"
 $sourcePluginCfg = Join-Path $resolvedSourceAddon "plugin.cfg"
 $sourcePluginGd = Join-Path $resolvedSourceAddon "plugin.gd"
 $bridgeDir = Join-Path $resolvedProjectRoot ".godot\godot_codex_bridge"
@@ -186,6 +214,12 @@ $snapshotAgeMs = Get-FileAgeMs $snapshotPath
 $activeEditorDetected = ($heartbeatAgeMs -ne $null -and $heartbeatAgeMs -le 5000)
 $staleEditor = ($heartbeatAgeMs -ne $null -and $heartbeatAgeMs -gt 5000)
 $changePreview = if ($sourceExists) { Get-AddonChangePreview $resolvedSourceAddon $targetAddon } else { $null }
+$targetInstallData = Read-JsonHashtable $targetInstallManifest
+$sourceChannel = if ($channelManifestData.Count -gt 0) { [string]$channelManifestData["channel"] } else { "stable" }
+$sourceBuildId = if ($channelManifestData.Count -gt 0) { [string]$channelManifestData["build_id"] } else { "" }
+$targetChannel = if ($targetInstallData.Count -gt 0) { [string]$targetInstallData["channel"] } else { "unmanaged" }
+$targetBuildId = if ($targetInstallData.Count -gt 0) { [string]$targetInstallData["build_id"] } else { "" }
+$updateAvailable = $sourceBuildId -ne "" -and $sourceBuildId -ne $targetBuildId
 
 $checks = [ordered]@{
   project_file_exists = $projectExists
@@ -273,6 +307,23 @@ if ($Apply) {
     port = $HostPort
     runtime = $HostRuntime
     launch_mode = "local_hidden_process"
+    distribution = [ordered]@{
+      channel = $sourceChannel
+      build_id = $sourceBuildId
+      channel_manifest_path = $resolvedChannelManifest
+    }
+  }
+
+  $installManifest = $null
+  if ($channelManifestData.Count -gt 0) {
+    $installManifest = [ordered]@{}
+    foreach ($key in $channelManifestData.Keys) {
+      $installManifest[$key] = $channelManifestData[$key]
+    }
+    $installManifest["installed_at"] = (Get-Date).ToUniversalTime().ToString("o")
+    $installManifest["source_addon_path"] = $resolvedSourceAddon
+    $installManifest["channel_manifest_path"] = $resolvedChannelManifest
+    $installManifest["project_root"] = $resolvedProjectRoot
   }
 
   $targetExistedBefore = Test-Path -LiteralPath $targetAddon
@@ -280,13 +331,28 @@ if ($Apply) {
   $stagedAddonActivated = $false
   try {
     Copy-Item -LiteralPath $resolvedSourceAddon -Destination $stagingPath -Recurse -Force
+    if (Test-Path -LiteralPath $targetAddon) {
+      $targetRootFull = [System.IO.Path]::GetFullPath($targetAddon).TrimEnd("\")
+      foreach ($uidFile in (Get-ChildItem -LiteralPath $targetRootFull -Recurse -File -Filter "*.uid")) {
+        $uidRelative = $uidFile.FullName.Substring($targetRootFull.Length).TrimStart("\")
+        $stagedUidPath = Join-Path $stagingPath $uidRelative
+        if (-not (Test-Path -LiteralPath $stagedUidPath)) {
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $stagedUidPath) | Out-Null
+          Copy-Item -LiteralPath $uidFile.FullName -Destination $stagedUidPath -Force
+        }
+      }
+    }
     $stagingPluginCfg = Join-Path $stagingPath "plugin.cfg"
     $stagingPluginGd = Join-Path $stagingPath "plugin.gd"
     $stagingHostConfig = Join-Path $stagingPath "host_config.json"
+    $stagingInstallManifest = Join-Path $stagingPath "install_manifest.json"
     if (-not (Test-Path -LiteralPath $stagingPluginCfg) -or -not (Test-Path -LiteralPath $stagingPluginGd)) {
       throw "Staged addon is incomplete: $stagingPath"
     }
     Write-Utf8NoBom $stagingHostConfig ($hostConfig | ConvertTo-Json -Depth 8)
+    if ($installManifest -ne $null) {
+      Write-Utf8NoBom $stagingInstallManifest ($installManifest | ConvertTo-Json -Depth 8)
+    }
 
     if (Test-Path -LiteralPath $targetAddon) {
       Move-Item -LiteralPath $targetAddon -Destination $backupPath
@@ -322,6 +388,10 @@ if ($Apply) {
   $action = if ($Replace) { "replaced" } else { "installed" }
   $targetExists = Test-Path -LiteralPath $targetPluginCfg
   $targetHostConfigExists = Test-Path -LiteralPath $targetHostConfig
+  $targetInstallData = Read-JsonHashtable $targetInstallManifest
+  $targetChannel = if ($targetInstallData.Count -gt 0) { [string]$targetInstallData["channel"] } else { "unmanaged" }
+  $targetBuildId = if ($targetInstallData.Count -gt 0) { [string]$targetInstallData["build_id"] } else { "" }
+  $updateAvailable = $sourceBuildId -ne "" -and $sourceBuildId -ne $targetBuildId
   $checks.target_plugin_cfg_exists = $targetExists
   $checks.target_host_config_exists = $targetHostConfigExists
 
@@ -351,6 +421,12 @@ if ($Apply) {
   target_host_config_path = $targetHostConfig
   source_addon_version = Get-PluginCfgVersion $sourcePluginCfg
   target_addon_version = Get-PluginCfgVersion $targetPluginCfg
+  source_channel = $sourceChannel
+  source_build_id = $sourceBuildId
+  target_channel = $targetChannel
+  target_build_id = $targetBuildId
+  update_available = $updateAvailable
+  target_install_manifest_path = $targetInstallManifest
   change_preview = $changePreview
   backup_path = $backupPath
   rollback_performed = $rollbackPerformed

@@ -23,14 +23,16 @@ Godot Codex Bridge is local-dev software until these gates pass.
   exports.
 - `godot.create_undo_snapshot` copies only explicitly listed safe text files into
   local bridge artifacts.
-- `godot.create_visual_baseline` and `godot.compare_visual_regression` work on
-  local PNG metadata and supported pixel diffs without uploading screenshots.
+- `godot.create_visual_baseline` fails closed until live screenshot permission
+  and project-confined provenance can be verified; `godot.compare_visual_regression`
+  remains local-only and its input confinement is a tracked release risk.
 - `godot.generate_scene_from_prompt` returns a live-editor action plan plus
   concrete `suggested_tool_calls`; it does not generate or apply `.tscn` file
   content, and vague prompts do not invent default scene geometry, cameras or
   lights.
-- `godot.apply_approved_diff` requires approval token, path validation, optional
-  SHA drift check and undo evidence.
+- `godot.apply_approved_diff` is disabled unless a Host/UI-issued, short-lived,
+  single-use receipt binds the exact project, operation, target, current state,
+  and proposed content.
 - `godot.fix_selected_node` requires live editor permission, approval token and
   Godot undo/redo support.
 - `npm test` passes in `mcp_server`.

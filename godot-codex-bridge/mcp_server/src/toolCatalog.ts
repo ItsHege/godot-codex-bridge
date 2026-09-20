@@ -84,7 +84,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   entry("godot.inspect_3d_scene", "diagnostics", "read_only", "Inspect 3D scene hints, camera/lights/meshes/colliders/nav/performance."),
   entry("godot.performance_get_snapshot", "diagnostics", "read_only", "Read bounded editor performance monitor values and timeline stats from the latest context snapshot."),
   entry("godot.create_diagnostic_snapshot", "diagnostics", "read_only", "Write local diagnostic evidence artifact under the bridge artifact directory."),
-  entry("godot.create_visual_baseline", "diagnostics", "read_only", "Create a local visual baseline from a screenshot artifact."),
+  entry("godot.create_visual_baseline", "diagnostics", "approval_write", "Disabled until live screenshot permission and project-confined source provenance can be verified."),
   entry("godot.compare_visual_regression", "diagnostics", "read_only", "Compare a current screenshot against a local visual baseline."),
   entry("godot.check_export_readiness", "diagnostics", "read_only", "Summarize PC/mobile export readiness without running exports."),
   entry("godot.capture_viewport_screenshot", "diagnostics", "read_only", "Capture a local viewport screenshot through the live addon."),
@@ -130,7 +130,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   entry("godot.save_all_scenes", "persistence_safety", "persistent_write", "Request save-all after review and permission."),
   entry("godot.create_undo_snapshot", "persistence_safety", "read_only", "Copy explicitly listed safe project files into a local undo snapshot."),
   entry("godot.preview_scene_diff", "persistence_safety", "read_only", "Preview a text file/scene diff without applying it."),
-  entry("godot.apply_approved_diff", "persistence_safety", "approval_write", "Apply reviewed text content after approval token and optional hash check."),
+  entry("godot.apply_approved_diff", "persistence_safety", "approval_write", "Fail closed until a trusted, one-shot human approval receipt flow is available."),
 
   entry("godot.run_current_scene", "runtime", "external_process", "Run the current scene, or an explicit project-local scene path, through the active Godot editor."),
   entry("godot.stop_running_scene", "runtime", "navigation", "Stop the current Godot editor play session if one is active and release Bridge-owned playtest input."),
@@ -241,7 +241,7 @@ export function getToolCatalog(category?: string, intent?: string, view: ToolCat
       "Prefer orientation tools before mutation tools.",
       "Use editor_batch for multi-step live editor navigation/mutation instead of many separate calls.",
       "UndoRedo-backed scene mutations are not persisted until godot.save_scene or godot.save_all_scenes succeeds.",
-      "Use preview_scene_diff/apply_approved_diff for text file edits; use live editor tools for scene/node edits.",
+      "Use preview_scene_diff for text-file review; direct apply_approved_diff is disabled until trusted approval receipts exist.",
     ],
   };
 }

@@ -11,9 +11,9 @@ const ChatThemeModel := preload("chat_theme_model.gd")
 const BridgeLimits := preload("bridge_limits.gd")
 
 
-## Builds a collapsible per-file diff section. `scroll_callback` is invoked
-## (deferred) when the section is toggled so the transcript can re-scroll.
-static func create_file_section(file_data: Dictionary, scroll_callback: Callable, palette: Dictionary = {}) -> Control:
+## Builds a collapsible per-file diff section. Expansion is supplied and
+## reported by stable file identity so streaming rerenders do not reset it.
+static func create_file_section(file_data: Dictionary, scroll_callback: Callable, palette: Dictionary = {}, expanded := false, toggle_callback: Callable = Callable()) -> Control:
 	var colors := _palette_values(palette)
 	var section := VBoxContainer.new()
 	section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -32,7 +32,7 @@ static func create_file_section(file_data: Dictionary, scroll_callback: Callable
 	section.add_child(toggle)
 
 	var details := PanelContainer.new()
-	details.visible = false
+	details.visible = expanded
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	details.set_meta("chat_diff_file_details", true)
 	var details_style := StyleBoxFlat.new()
@@ -71,9 +71,12 @@ static func create_file_section(file_data: Dictionary, scroll_callback: Callable
 		truncated.add_theme_color_override("font_color", colors.get("diff_font", Color(0.92, 0.72, 0.40)))
 		lines_box.add_child(truncated)
 
+	toggle.text = ("- " if expanded else "+ ") + header_text
 	toggle.pressed.connect(func() -> void:
 		details.visible = not details.visible
 		toggle.text = ("- " if details.visible else "+ ") + header_text
+		if toggle_callback.is_valid():
+			toggle_callback.call(details.visible)
 		if scroll_callback.is_valid():
 			scroll_callback.call_deferred()
 	)

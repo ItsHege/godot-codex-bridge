@@ -38,8 +38,7 @@ func _run() -> void:
 	_assert_true(compact.begins_with("Work note - "), "compact work note prefix")
 	_assert_true(compact.find("[More]") >= 0, "compact work note has more hint")
 	var work_summary := ChatTranscriptModel.work_batch_summary(3, work_text, 64, 2)
-	_assert_true(work_summary.begins_with("Work notes: 3 updates."), "work batch summary counts updates")
-	_assert_true(work_summary.find("Checking files now.") >= 0, "work batch summary includes compact preview")
+	_assert_eq(work_summary, "Work notes · 3 updates", "work batch summary is compact without duplicating note text")
 	_assert_eq(ChatTranscriptModel.work_batch_toggle_text(false, 3), "Show 3 notes", "work batch collapsed toggle")
 	_assert_eq(ChatTranscriptModel.work_batch_toggle_text(true, 3), "Hide notes", "work batch expanded toggle")
 

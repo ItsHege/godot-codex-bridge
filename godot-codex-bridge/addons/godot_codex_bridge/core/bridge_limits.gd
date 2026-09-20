@@ -23,7 +23,6 @@ const SEND_CONTEXT_PATH := BRIDGE_DIR + "/artifacts/send_context.json"
 const NOTES_PATH := BRIDGE_DIR + "/notes.json"
 const HOST_CONFIG_PATH := "res://addons/godot_codex_bridge/host_config.json"
 const FIX_SELECTED_NODE_APPROVAL_TOKEN := "APPROVE_GODOT_CODEX_BRIDGE_FIX_SELECTED_NODE"
-const VALIDATION_PERMISSION_TOKEN := "GCB_VALIDATE_PERMISSION_TOGGLE"
 const DEFAULT_CODEX_HOST_PORT := 49390
 const CODEX_HOST_URL := "ws://127.0.0.1:49390"
 

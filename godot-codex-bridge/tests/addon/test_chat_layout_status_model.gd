@@ -52,6 +52,9 @@ func _run() -> void:
 			"connect_button_visible": true,
 			"connect_button_in_status_header": true,
 			"connect_button_focus_mode": Control.FOCUS_ALL,
+			"main_screen_registered": true,
+			"dock_registered": true,
+			"bottom_panel_registered": false,
 			"panel_minimum_size": Vector2(220, 0),
 			"log_frame_minimum_size": Vector2(0, 48),
 			"log_minimum_size": Vector2(),
@@ -90,6 +93,9 @@ func _run() -> void:
 	_assert_true(bool(status.get("connect_button_in_status_header", false)), "status connect button in header")
 	_assert_eq(status.get("connect_button_focus_mode"), Control.FOCUS_ALL, "status connect keyboard focus")
 	_assert_eq(status.get("advanced_toggle_focus_mode"), Control.FOCUS_ALL, "status advanced keyboard focus")
+	_assert_true(bool(status.get("main_screen_registered", false)), "status main screen registration")
+	_assert_true(bool(status.get("dock_registered", false)), "status dock registration")
+	_assert_false(bool(status.get("bottom_panel_registered", true)), "status no bottom panel registration")
 	_assert_eq(status.get("pending_annotation_id"), "ann-1", "status annotation id")
 	_assert_eq(status.get("mcp_tools_available"), true, "runtime field copied")
 	_assert_eq(status.get("chat_message_count"), 3, "count field copied")

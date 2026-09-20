@@ -28,7 +28,16 @@ export class GodotSocketServer {
     if (this.server) {
       return;
     }
+    // This is a native local IPC service, not a browser or LAN API.
+    if (this.host !== "127.0.0.1" && this.host !== "::1") {
+      throw new Error("Codex Host must bind to a numeric loopback address (127.0.0.1 or ::1).");
+    }
     this.httpServer = createServer((request, response) => {
+      if (!this.isAllowedRequest(request)) {
+        response.writeHead(403, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "local_client_required" }));
+        return;
+      }
       void (async () => {
         if (request.url === "/health" && request.method === "GET") {
           response.writeHead(200, { "content-type": "application/json" });
@@ -62,7 +71,9 @@ export class GodotSocketServer {
       this.httpServer?.listen(this.port, this.host);
     });
     this.server = new WebSocketServer({
-      server: this.httpServer
+      server: this.httpServer,
+      maxPayload: MAX_MESSAGE_BYTES,
+      verifyClient: ({ req }: { req: IncomingMessage }) => this.isAllowedRequest(req)
     });
     this.server.on("connection", (socket) => this.onConnection(socket));
     this.controller.on("event", (event: HostEvent) => this.broadcast(event));
@@ -97,8 +108,22 @@ export class GodotSocketServer {
     return address.port;
   }
 
+  private isAllowedRequest(request: IncomingMessage): boolean {
+    // Reject browser origins (including "null") and DNS-rebinding Host names
+    // before exposing status or dispatching any RPC. Native Godot/Node clients
+    // send neither Origin nor Fetch Metadata headers.
+    if (request.headers.origin !== undefined || request.headers["sec-fetch-site"] !== undefined) {
+      return false;
+    }
+    const port = this.addressPort();
+    return [`127.0.0.1:${port}`, `[::1]:${port}`, `localhost:${port}`].includes(request.headers.host ?? "");
+  }
+
   private onConnection(socket: WebSocket): void {
     this.clients.add(socket);
+    // ws emits an error before closing oversized/malformed frames. Handle it
+    // locally so an untrusted frame cannot crash the host process.
+    socket.on("error", () => socket.terminate());
     socket.on("close", () => this.clients.delete(socket));
     socket.on("message", (raw) => void this.onMessage(socket, raw));
     socket.send(JSON.stringify({

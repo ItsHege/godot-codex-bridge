@@ -26,6 +26,20 @@ test("ApprovalGate keeps permission grants blocked", async () => {
     () => gate.resolve({ approval_id: approval.approval_id, nonce: approval.nonce, decision: "approve" }),
     /approval_not_approvable_by_chat/
   );
+  const originalBlockedReason = approval.blocked_reason;
+  const invalidated = await gate.invalidateByRuntimeId("runtime-1", "server_resolved");
+  assert.equal(invalidated?.status, "resolved_by_server");
+  assert.equal(invalidated?.approvable_by_chat, false);
+  assert.equal(invalidated?.blocked_reason, originalBlockedReason);
+  assert.equal(invalidated?.invalidation_reason, "server_resolved");
+  const saved = JSON.parse(await fs.readFile(path.join(dir, `${approval.approval_id}.json`), "utf8")) as {
+    approvable_by_chat: boolean;
+    blocked_reason: string;
+    invalidation_reason: string;
+  };
+  assert.equal(saved.approvable_by_chat, false);
+  assert.equal(saved.blocked_reason, originalBlockedReason);
+  assert.equal(saved.invalidation_reason, "server_resolved");
 });
 
 test("ApprovalGate allows one-shot manual command approval without diff evidence", async () => {
@@ -53,6 +67,57 @@ test("ApprovalGate allows one-shot manual command approval without diff evidence
     decision: "approve"
   });
   assert.equal(resolved.runtimeDecision, "approve");
+});
+
+test("ApprovalGate stages responses and server invalidation wins without a false approval terminal", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-approval-race-"));
+  const gate = new ApprovalGate(dir);
+  const approval = await gate.create({
+    runtime_approval_id: "runtime-race",
+    kind: "command_execution",
+    command: "echo race",
+    raw_method: "item/commandExecution/requestApproval",
+    raw_params: {},
+  });
+  const begun = await gate.beginResolve({
+    approval_id: approval.approval_id,
+    nonce: approval.nonce,
+    decision: "approve",
+  });
+  assert.equal(begun.approval.status, "responding");
+  const invalidated = await gate.invalidateByRuntimeId("runtime-race", "server_resolved");
+  assert.equal(invalidated?.status, "resolved_by_server");
+  assert.equal(invalidated?.approvable_by_chat, true);
+  assert.equal(invalidated?.blocked_reason, null);
+  assert.equal(await gate.invalidateByRuntimeId("runtime-race", "duplicate"), null);
+  await assert.rejects(
+    gate.completeResolve(approval.approval_id, "approve"),
+    /approval_not_responding/,
+  );
+  await assert.rejects(
+    gate.beginResolve({ approval_id: approval.approval_id, nonce: approval.nonce, decision: "approve" }),
+    /approval_not_pending/,
+  );
+  const saved = JSON.parse(await fs.readFile(path.join(dir, `${approval.approval_id}.json`), "utf8")) as { status: string; invalidation_reason: string };
+  assert.equal(saved.status, "resolved_by_server");
+  assert.equal(saved.invalidation_reason, "server_resolved");
+});
+
+test("ApprovalGate aborts an unsent staged response back to pending", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-approval-abort-"));
+  const gate = new ApprovalGate(dir);
+  const approval = await gate.create({
+    runtime_approval_id: "runtime-abort",
+    kind: "command_execution",
+    command: "echo retry",
+    raw_method: "item/commandExecution/requestApproval",
+    raw_params: {},
+  });
+  await gate.beginResolve({ approval_id: approval.approval_id, nonce: approval.nonce, decision: "approve" });
+  assert.equal((await gate.abortResolve(approval.approval_id))?.status, "pending");
+  const retry = await gate.beginResolve({ approval_id: approval.approval_id, nonce: approval.nonce, decision: "reject" });
+  await gate.completeResolve(approval.approval_id, retry.runtimeDecision);
+  assert.equal(retry.approval.status, "rejected");
 });
 
 test("ApprovalGate allows session command approval", async () => {

@@ -32,6 +32,19 @@ func set_source_image(image: Image) -> void:
 	markers_changed.emit()
 
 
+func clear_source_image() -> void:
+	source_image = null
+	source_texture = null
+	markers.clear()
+	_draft_marker.clear()
+	_dragging = false
+	_panning = false
+	zoom_factor = 1.0
+	pan_offset = Vector2.ZERO
+	queue_redraw()
+	markers_changed.emit()
+
+
 func set_tool(tool: String) -> void:
 	active_tool = tool
 

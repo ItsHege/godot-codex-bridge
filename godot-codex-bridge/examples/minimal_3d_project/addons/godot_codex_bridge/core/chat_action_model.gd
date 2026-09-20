@@ -133,8 +133,11 @@ static func chat_send_plan(
 	effort: String,
 	allow_screenshots: bool
 ) -> Dictionary:
-	var attachments := attachment_flags(include_context, include_selected, include_screenshot, has_pending_annotation)
-	var params := thread_send_payload(message.strip_edges(), thread_id, attachments, pending_annotation, model, effort)
+	var screenshots_allowed := allow_screenshots
+	var include_annotation := has_pending_annotation and screenshots_allowed
+	var attachments := attachment_flags(include_context, include_selected, include_screenshot and screenshots_allowed, include_annotation)
+	var effective_annotation := pending_annotation if include_annotation else {}
+	var params := thread_send_payload(message.strip_edges(), thread_id, attachments, effective_annotation, model, effort)
 	return {
 		"method": "thread.send",
 		"params": params,

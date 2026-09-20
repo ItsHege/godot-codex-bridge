@@ -31,19 +31,65 @@ func _run() -> void:
 	_assert_true(bool(turn.get("reset_diff_batch", false)), "turn resets diff")
 	_assert_true(bool(turn.get("reset_work_batch", false)), "turn resets work")
 
-	var interrupted := ChatEventModel.classify_event("turn.interrupted", {}, {})
+	var interrupted := ChatEventModel.classify_event("turn.interrupted", {"turn_id": "turn-1"}, {
+		"approval": {"approval_id": "approval-1", "turn_id": "turn-1"},
+	})
 	_assert_true(bool(interrupted.get("flush_assistant", false)), "interrupted flushes")
 	_assert_true(bool(interrupted.get("clear_turn", false)), "interrupted clears turn")
+	_assert_true(bool(interrupted.get("clear_approval", false)), "interrupted clears matching approval")
 	_assert_eq(interrupted.get("system_message"), "Codex response stopped.", "interrupted message")
+	var unrelated_interrupted := ChatEventModel.classify_event("turn.interrupted", {"turn_id": "turn-other"}, {
+		"approval": {"approval_id": "approval-1", "turn_id": "turn-1"},
+	})
+	_assert_false(bool(unrelated_interrupted.get("clear_approval", false)), "unrelated interruption keeps approval")
+	var interrupted_plan := ChatEventModel.event_handler_plan("turn.interrupted", {"turn_id": "turn-1"}, {
+		"turn_id": "turn-1",
+		"approval": {"approval_id": "approval-1", "turn_id": "turn-1"},
+	})
+	_assert_true(_has_effect(interrupted_plan.get("effects", []) as Array, "clear_approval"), "interrupted plan clears matching approval")
 
 	var approval := ChatEventModel.classify_event("approval.requested", {}, {})
 	_assert_eq(approval.get("runtime_state"), "waiting_for_approval", "approval runtime")
 	_assert_true(bool(approval.get("show_approval", false)), "approval show")
 
-	var resolved := ChatEventModel.classify_event("approval.resolved", {"decision": "approve"}, {})
-	_assert_eq(resolved.get("runtime_state"), "ready", "resolved runtime")
+	var resolved := ChatEventModel.classify_event("approval.resolved", {
+		"approval_id": "approval-1",
+		"decision": "approve",
+	}, {"approval": {"approval_id": "approval-1", "runtime_approval_id": "runtime-1"}})
+	_assert_false(resolved.has("runtime_state"), "resolved waits for authoritative host runtime state")
 	_assert_true(bool(resolved.get("clear_approval", false)), "resolved clears")
 	_assert_eq(resolved.get("approval_clear_message"), "Approval resolved: approve", "resolved message")
+	var runtime_resolved := ChatEventModel.classify_event("approval.resolved", {
+		"runtime_approval_id": "runtime-1",
+		"status": "cancelled",
+	}, {"approval": {"approval_id": "approval-1", "runtime_approval_id": "runtime-1"}})
+	_assert_true(bool(runtime_resolved.get("clear_approval", false)), "runtime fallback clears matching approval")
+	_assert_eq(runtime_resolved.get("approval_clear_message"), "Approval resolved: cancelled", "runtime resolution status message")
+	_assert_false(runtime_resolved.has("runtime_state"), "runtime fallback resolution waits for host status")
+	var mismatched_resolved := ChatEventModel.classify_event("approval.resolved", {
+		"approval_id": "approval-other",
+		"runtime_approval_id": "runtime-1",
+		"decision": "reject",
+	}, {"approval": {"approval_id": "approval-1", "runtime_approval_id": "runtime-1"}})
+	_assert_false(bool(mismatched_resolved.get("clear_approval", false)), "mismatched resolution keeps active approval")
+	_assert_false(mismatched_resolved.has("runtime_state"), "mismatched resolution keeps runtime state")
+	_assert_false(bool(mismatched_resolved.get("update_ui", true)), "mismatched resolution is a UI no-op")
+	var duplicate_resolved := ChatEventModel.classify_event("approval.resolved", {
+		"approval_id": "approval-1",
+		"decision": "approve",
+	}, {"approval": {}})
+	_assert_false(bool(duplicate_resolved.get("clear_approval", false)), "duplicate resolution is idempotent")
+	_assert_false(duplicate_resolved.has("runtime_state"), "duplicate resolution keeps runtime state")
+	var expired := ChatEventModel.classify_event("approval.expired", {
+		"approval_id": "approval-1",
+	}, {"approval": {"approval_id": "approval-1"}})
+	_assert_true(bool(expired.get("clear_approval", false)), "matching expiry clears approval")
+	_assert_eq(expired.get("approval_clear_message"), "Approval expired; files left unchanged.", "matching expiry message")
+	_assert_false(expired.has("runtime_state"), "matching expiry waits for authoritative host runtime state")
+	var mismatched_expired := ChatEventModel.classify_event("approval.expired", {
+		"approval_id": "approval-other",
+	}, {"approval": {"approval_id": "approval-1"}})
+	_assert_false(bool(mismatched_expired.get("clear_approval", false)), "mismatched expiry keeps active approval")
 
 	var background := ChatEventModel.classify_event("background.updated", {}, {})
 	_assert_true(bool(background.get("background_update", false)), "background action")
@@ -55,8 +101,10 @@ func _run() -> void:
 	var unsupported := ChatEventModel.classify_event("custom.event", {}, {})
 	_assert_false(bool(unsupported.get("known", true)), "unsupported known flag")
 
-	var delta := ChatEventModel.classify_turn_event({"event": "agent_message_delta", "text": "hi", "item_id": "item", "phase": "final"})
+	var delta := ChatEventModel.classify_turn_event({"event": "agent_message_delta", "text": "hi", "item_id": "item", "phase": "final", "event_id": "event-1", "turn_id": "turn-1"})
 	_assert_eq(delta.get("action"), "assistant_delta", "delta action")
+	_assert_eq(delta.get("event_id"), "event-1", "delta preserves event identity for dedupe")
+	_assert_eq(delta.get("turn_id"), "turn-1", "delta preserves turn identity")
 	_assert_eq(delta.get("text"), "hi", "delta text")
 	_assert_eq(delta.get("item_id"), "item", "delta item")
 	_assert_eq(delta.get("phase"), "final", "delta phase")
@@ -142,11 +190,28 @@ func _run() -> void:
 	_assert_eq((started_effects[4] as Dictionary).get("action"), "detail_message", "started plan detail last")
 	_assert_true(bool(started_plan.get("update_ui", false)), "started plan updates ui")
 
-	var approval_plan := ChatEventModel.event_handler_plan("approval.resolved", {"decision": "approve"}, {})
+	var approval_plan := ChatEventModel.event_handler_plan("approval.resolved", {
+		"approval_id": "approval-1",
+		"decision": "approve",
+	}, {"approval": {"approval_id": "approval-1"}})
 	var approval_effects := approval_plan.get("effects", []) as Array
-	_assert_eq((approval_effects[0] as Dictionary).get("action"), "apply_state_patch", "approval plan applies state first")
-	_assert_eq((approval_effects[1] as Dictionary).get("action"), "clear_approval", "approval plan clears approval")
-	_assert_eq((approval_effects[1] as Dictionary).get("message"), "Approval resolved: approve", "approval plan clear message")
+	_assert_true((approval_plan.get("state_patch", {}) as Dictionary).is_empty(), "approval plan waits for host status state patch")
+	_assert_eq(approval_effects.size(), 1, "approval plan emits only card clear")
+	_assert_eq((approval_effects[0] as Dictionary).get("action"), "clear_approval", "approval plan clears approval")
+	_assert_eq((approval_effects[0] as Dictionary).get("message"), "Approval resolved: approve", "approval plan clear message")
+
+	var expiry_plan := ChatEventModel.event_handler_plan("approval.expired", {
+		"approval_id": "approval-1",
+	}, {"runtime_state": "waiting_for_approval", "approval": {"approval_id": "approval-1"}})
+	_assert_true((expiry_plan.get("state_patch", {}) as Dictionary).is_empty(), "expiry plan waits for host status state patch")
+	_assert_eq(((expiry_plan.get("effects", []) as Array)[0] as Dictionary).get("action"), "clear_approval", "expiry plan still clears exact card")
+
+	var mismatched_plan := ChatEventModel.event_handler_effect_plan("approval.resolved", {
+		"approval_id": "approval-other",
+		"decision": "approve",
+	}, {"runtime_state": "waiting_for_approval", "approval": {"approval_id": "approval-1"}})
+	_assert_eq((mismatched_plan.get("effects", []) as Array).size(), 0, "mismatched resolution emits no effects")
+	_assert_true((mismatched_plan.get("state_patch", {}) as Dictionary).is_empty(), "mismatched resolution emits no state patch")
 
 	var status_plan := ChatEventModel.event_handler_plan("host.status", {"state": "ready"}, {})
 	var status_effects := status_plan.get("effects", []) as Array
@@ -172,6 +237,13 @@ func _assert_eq(actual: Variant, expected: Variant, label: String) -> void:
 	if actual != expected:
 		_failures += 1
 		push_error(label + " expected=" + str(expected) + " actual=" + str(actual))
+
+
+func _has_effect(effects: Array, action: String) -> bool:
+	for effect in effects:
+		if typeof(effect) == TYPE_DICTIONARY and str((effect as Dictionary).get("action", "")) == action:
+			return true
+	return false
 
 
 func _assert_true(value: bool, label: String) -> void:

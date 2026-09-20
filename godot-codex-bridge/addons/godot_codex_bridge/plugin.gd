@@ -20,8 +20,10 @@ const ChatSocketController := preload("core/chat_socket_controller.gd")
 const ChatTranscriptModel := preload("core/chat_transcript_model.gd")
 const ChatTranscriptBatchModel := preload("core/chat_transcript_batch_model.gd")
 const ChatTranscriptView := preload("core/chat_transcript_view.gd")
+const ChatScrollPolicyModel := preload("core/chat_scroll_policy_model.gd")
 const ChatThemeModel := preload("core/chat_theme_model.gd")
 const ChatPanelView := preload("core/chat_panel_view.gd")
+const GcWorkChannelModel := preload("core/gc_work_channel_model.gd")
 const ChatSessionModel := preload("core/chat_session_model.gd")
 const ChatStatusModel := preload("core/chat_status_model.gd")
 const ChatTeamModel := preload("core/chat_team_model.gd")
@@ -78,7 +80,6 @@ const SEND_CONTEXT_PATH := BridgeLimits.SEND_CONTEXT_PATH
 const NOTES_PATH := BridgeLimits.NOTES_PATH
 const HOST_CONFIG_PATH := BridgeLimits.HOST_CONFIG_PATH
 const FIX_SELECTED_NODE_APPROVAL_TOKEN := BridgeLimits.FIX_SELECTED_NODE_APPROVAL_TOKEN
-const VALIDATION_PERMISSION_TOKEN := BridgeLimits.VALIDATION_PERMISSION_TOKEN
 const DEFAULT_CODEX_HOST_PORT := BridgeLimits.DEFAULT_CODEX_HOST_PORT
 const CODEX_HOST_URL := BridgeLimits.CODEX_HOST_URL
 
@@ -144,6 +145,8 @@ var _chat_dock: VBoxContainer
 var _chat_socket: WebSocketPeer
 var _chat_status_label: Label
 var _chat_status_dot: ColorRect
+var _chat_build_label: Label
+var _chat_trust_indicator: Label
 var _chat_readiness_label: Label
 var _chat_thread_label: Label
 var _chat_new_button: Button
@@ -152,6 +155,9 @@ var _chat_log_frame: Control
 var _chat_log_view: ScrollContainer
 var _chat_message_list: VBoxContainer
 var _chat_bottom_spacer: Control
+var _chat_jump_latest_button: Button
+var _chat_follow_latest := true
+var _chat_scroll_user_input_pending := false
 var _chat_input_row: VBoxContainer
 var _chat_input: TextEdit
 var _chat_eye_button: Button
@@ -230,6 +236,8 @@ var _chat_technical_log: Array = []
 var _performance_history: Array = []
 var _poll_elapsed := 0.0
 var _host_config: Dictionary = {}
+var _gc_work_status: Dictionary = {}
+var _gc_work_refresh_elapsed := 0.0
 var _host_config_status := "missing"
 var _host_config_message := ""
 var _host_config_runtime := ""
@@ -263,8 +271,11 @@ var _chat_recoverable_message := ""
 var _chat_fatal_message := ""
 var _chat_thread_id := ""
 var _chat_turn_id := ""
+var _chat_seen_turn_event_ids := {}
 var _chat_request_id := 0
 var _chat_request_methods := {}
+var _chat_last_completed_project_attach_request_id := -1
+var _chat_last_completed_project_attach_method := ""
 var _chat_models_loaded := false
 var _chat_model_options: Array[Dictionary] = []
 var _chat_reasoning_efforts: Array[Dictionary] = []
@@ -330,6 +341,7 @@ func _enter_tree() -> void:
 	_notes_abs = ProjectSettings.globalize_path(NOTES_PATH)
 	_host_config_abs = ProjectSettings.globalize_path(HOST_CONFIG_PATH)
 	_host_config = _load_host_config()
+	_refresh_gc_work_status()
 
 	_context = BridgeContext.new()
 	_context.undo_redo = get_undo_redo()
@@ -431,6 +443,10 @@ func _exit_tree() -> void:
 
 func _process(delta: float) -> void:
 	_poll_chat_socket(delta)
+	_gc_work_refresh_elapsed += delta
+	if _gc_work_refresh_elapsed >= 5.0:
+		_gc_work_refresh_elapsed = 0.0
+		_refresh_gc_work_status()
 	if ChatStatusModel.is_foreground_busy(_chat_runtime_state):
 		_chat_working_refresh_elapsed += delta
 		if _chat_working_refresh_elapsed >= 1.0:
@@ -714,6 +730,9 @@ func _create_chat_panel() -> VBoxContainer:
 
 	_chat_status_dot = refs.get("status_dot") as ColorRect
 	_chat_status_label = refs.get("status_label") as Label
+	_chat_build_label = refs.get("build_label") as Label
+	_apply_gc_work_status()
+	_chat_trust_indicator = refs.get("trust_indicator") as Label
 	_chat_advanced_toggle = refs.get("advanced_toggle") as CheckButton
 	_chat_advanced_toggle.toggled.connect(_set_chat_advanced_visible)
 
@@ -813,8 +832,11 @@ func _create_chat_panel() -> VBoxContainer:
 
 	_chat_log_frame = refs.get("log_frame") as Control
 	_chat_log_view = refs.get("log_view") as ScrollContainer
+	_chat_log_view.gui_input.connect(_on_chat_log_gui_input)
 	_chat_message_list = refs.get("message_list") as VBoxContainer
 	_chat_bottom_spacer = refs.get("bottom_spacer") as Control
+	_chat_jump_latest_button = refs.get("jump_latest_button") as Button
+	_chat_jump_latest_button.pressed.connect(_jump_chat_to_latest)
 	_setup_chat_transcript_view()
 
 	_set_chat_advanced_visible(false)
@@ -825,6 +847,33 @@ func _create_chat_panel() -> VBoxContainer:
 		_append_chat_system("Connecting to Codex automatically. Use Connect to retry if needed.")
 	_update_chat_ui()
 	return panel
+
+
+func _refresh_gc_work_status() -> void:
+	var install_path := ProjectSettings.globalize_path(GcWorkChannelModel.INSTALL_MANIFEST_PATH)
+	var installed := GcWorkChannelModel.load_manifest(install_path)
+	var available := {}
+	var channel_path := GcWorkChannelModel.channel_manifest_path(installed)
+	if channel_path != "":
+		available = GcWorkChannelModel.load_manifest(channel_path)
+	var next_status := GcWorkChannelModel.status(installed, available)
+	if next_status != _gc_work_status:
+		_gc_work_status = next_status
+		_apply_gc_work_status()
+
+
+func _apply_gc_work_status() -> void:
+	if _chat_build_label == null:
+		return
+	_chat_build_label.text = str(_gc_work_status.get("label", "Addon: unmanaged"))
+	_chat_build_label.tooltip_text = str(_gc_work_status.get("tooltip", ""))
+	match str(_gc_work_status.get("tone", "neutral")):
+		"ok":
+			_chat_build_label.add_theme_color_override("font_color", Color(0.42, 0.86, 0.58))
+		"warn":
+			_chat_build_label.add_theme_color_override("font_color", Color(0.92, 0.72, 0.34))
+		_:
+			_chat_build_label.add_theme_color_override("font_color", Color(0.72, 0.74, 0.78))
 
 
 func _set_chat_advanced_visible(visible: bool) -> void:
@@ -966,6 +1015,8 @@ func _add_permission_checkbox(panel: VBoxContainer, key: String, label: String) 
 	checkbox.button_pressed = bool(_permissions.get(key, false))
 	checkbox.toggled.connect(func(pressed: bool) -> void:
 		_permissions[key] = pressed
+		if key == "allow_screenshots" and not pressed and _annotation_controller != null:
+			_annotation_controller.invalidate_sensitive_capture()
 		_write_permissions()
 		_write_bridge_state(true)
 		_log_event("permission_changed", {"permission": key, "enabled": pressed})
@@ -1186,6 +1237,10 @@ func _performance_monitors_payload() -> Dictionary:
 func _screenshots_payload() -> Array:
 	return _introspection._screenshots_payload()
 func _capture_viewport_screenshot(reason: String) -> Dictionary:
+	if not _permission_enabled("allow_screenshots"):
+		var permission_error := _error_payload("permission_denied", "Screenshot permission is disabled in the Codex Bridge dock.")
+		_log_event("permission_denied", {"permission": "allow_screenshots", "source": reason})
+		return {"ok": false, "error": permission_error}
 	_ensure_bridge_dirs()
 
 	if DisplayServer.get_name().to_lower() == "headless":
@@ -1642,6 +1697,9 @@ func _handle_chat_result(result: Variant, request_id := -1) -> void:
 	if request_id >= 0:
 		source_method = str(_chat_request_methods.get(request_id, ""))
 		_chat_request_methods.erase(request_id)
+		if source_method in ["project.attach", "host.restart_for_project"]:
+			_chat_last_completed_project_attach_request_id = request_id
+			_chat_last_completed_project_attach_method = source_method
 	var plan := ChatHostStateModel.result_effect_plan(data, {
 		"runtime_state": _chat_runtime_state,
 		"background_task_id": _active_background_task_id,
@@ -1758,6 +1816,7 @@ func _handle_chat_event(method: String, params: Dictionary) -> void:
 		"runtime_state": _chat_runtime_state,
 		"thread_id": _chat_thread_id,
 		"turn_id": _chat_turn_id,
+		"approval": _active_chat_approval,
 	})
 	_apply_chat_event_effects(plan.get("effects", []) as Array)
 
@@ -1806,7 +1865,10 @@ func _apply_chat_event_state_patch(patch: Dictionary) -> void:
 	if patch.has("thread_id"):
 		_chat_thread_id = str(patch.get("thread_id", _chat_thread_id))
 	if patch.has("turn_id"):
-		_chat_turn_id = str(patch.get("turn_id", _chat_turn_id))
+		var next_turn_id := str(patch.get("turn_id", _chat_turn_id))
+		if next_turn_id != _chat_turn_id:
+			_chat_seen_turn_event_ids.clear()
+		_chat_turn_id = next_turn_id
 
 
 func _handle_chat_turn_event(params: Dictionary) -> void:
@@ -1819,6 +1881,8 @@ func _apply_chat_turn_event_effects(effects: Array) -> void:
 		if typeof(effect) != TYPE_DICTIONARY:
 			continue
 		var effect_dict := effect as Dictionary
+		if _chat_turn_event_is_duplicate(effect_dict):
+			continue
 		match str(effect_dict.get("action", "")):
 			"assistant_delta":
 				_append_chat_assistant_delta(
@@ -1830,6 +1894,18 @@ func _apply_chat_turn_event_effects(effects: Array) -> void:
 				_record_chat_diff_update(str(effect_dict.get("diff_text", "")))
 			"detail_message":
 				_append_chat_detail(str(effect_dict.get("message", "")))
+
+
+func _chat_turn_event_is_duplicate(effect: Dictionary) -> bool:
+	var event_id := str(effect.get("event_id", "")).strip_edges()
+	if event_id == "":
+		return false
+	var turn_id := str(effect.get("turn_id", _chat_turn_id)).strip_edges()
+	var identity := turn_id + ":" + event_id
+	if _chat_seen_turn_event_ids.has(identity):
+		return true
+	_chat_seen_turn_event_ids[identity] = true
+	return false
 
 
 func _send_chat_message() -> void:
@@ -1845,6 +1921,10 @@ func _send_chat_message() -> void:
 
 	message = str(preflight.get("message", message))
 
+	if not _permission_enabled("allow_screenshots") and _annotation_controller != null and _annotation_controller.has_pending():
+		_annotation_controller.invalidate_sensitive_capture()
+	if not _permission_enabled("allow_screenshots") and _chat_attach_screenshot != null:
+		_chat_attach_screenshot.button_pressed = false
 	var has_pending_annotation := _annotation_controller != null and _annotation_controller.has_pending()
 	var pending_annotation := _annotation_controller.pending() if has_pending_annotation else {}
 	var send_plan := ChatActionModel.chat_send_plan(
@@ -2275,9 +2355,13 @@ func _update_chat_work_batch_bubble() -> void:
 func _append_chat_work_bubble() -> PanelContainer:
 	if _chat_transcript_view == null:
 		return null
+	var owned_controls := {}
 	_chat_active_work_controls = _chat_transcript_view.append_work_batch(func() -> void:
-		_set_chat_work_visible(not _chat_active_work_visible)
+		if owned_controls == _chat_active_work_controls:
+			var owned_body := owned_controls.get("body_label", null) as Control
+			_set_chat_work_visible(owned_body != null and owned_body.visible)
 	)
+	owned_controls = _chat_active_work_controls
 	_chat_active_work_panel = _chat_active_work_controls.get("panel", null) as PanelContainer
 	_chat_active_work_summary_label = _chat_active_work_controls.get("summary_label", null) as Label
 	_chat_active_work_toggle_button = _chat_active_work_controls.get("toggle_button", null) as Button
@@ -2329,9 +2413,13 @@ func _update_chat_diff_batch_bubble() -> void:
 func _append_chat_diff_bubble() -> VBoxContainer:
 	if _chat_transcript_view == null:
 		return null
+	var owned_controls := {}
 	_chat_active_diff_controls = _chat_transcript_view.append_diff_batch(func() -> void:
-		_set_chat_diff_files_visible(not _chat_active_diff_files_visible)
+		if owned_controls == _chat_active_diff_controls:
+			var owned_files := owned_controls.get("files_box", null) as Control
+			_set_chat_diff_files_visible(owned_files != null and owned_files.visible)
 	)
+	owned_controls = _chat_active_diff_controls
 	_chat_active_diff_panel = _chat_active_diff_controls.get("files_box", null) as VBoxContainer
 	_chat_active_diff_summary_label = _chat_active_diff_controls.get("summary_label", null) as Label
 	_chat_active_diff_toggle_button = _chat_active_diff_controls.get("toggle_button", null) as Button
@@ -2389,7 +2477,7 @@ func _append_chat_detail(text: String) -> void:
 	)
 
 
-func _append_chat_bubble(author: String, text: String, background: Color, accent: Color, force_collapsed: bool = false) -> Label:
+func _append_chat_bubble(author: String, text: String, background: Color, accent: Color, force_collapsed: bool = false) -> RichTextLabel:
 	if _chat_transcript_view == null:
 		_setup_chat_transcript_view()
 	if _chat_transcript_view == null:
@@ -2407,6 +2495,8 @@ func _chat_theme_palette() -> Dictionary:
 
 
 func _clear_chat_transcript() -> void:
+	_chat_follow_latest = true
+	_update_jump_latest_button()
 	_flush_chat_assistant_text()
 	_reset_chat_assistant_stream_state(false)
 	_reset_chat_work_batch()
@@ -2447,9 +2537,46 @@ func _chat_message_control_counts() -> Dictionary:
 func _scroll_chat_to_bottom() -> void:
 	if _chat_log_view == null:
 		return
+	var update := ChatScrollPolicyModel.content_update(_chat_follow_latest)
+	if not bool(update.get("scroll_to_bottom", false)):
+		_update_jump_latest_button()
+		return
 	var scroll_bar := _chat_log_view.get_v_scroll_bar()
 	if scroll_bar != null:
 		scroll_bar.value = scroll_bar.max_value
+	_update_jump_latest_button()
+
+
+func _on_chat_log_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if mouse_event.pressed and mouse_event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_LEFT]:
+			_chat_scroll_user_input_pending = true
+			call_deferred("_apply_chat_user_scroll_position")
+	elif event is InputEventPanGesture:
+		_chat_scroll_user_input_pending = true
+		call_deferred("_apply_chat_user_scroll_position")
+
+
+func _apply_chat_user_scroll_position() -> void:
+	if not _chat_scroll_user_input_pending or _chat_log_view == null:
+		return
+	_chat_scroll_user_input_pending = false
+	var scroll_bar := _chat_log_view.get_v_scroll_bar()
+	if scroll_bar == null:
+		return
+	_chat_follow_latest = bool(ChatScrollPolicyModel.after_user_scroll(scroll_bar.value, scroll_bar.max_value).get("follow_latest", true))
+	_update_jump_latest_button()
+
+
+func _jump_chat_to_latest() -> void:
+	_chat_follow_latest = true
+	_scroll_chat_to_bottom()
+
+
+func _update_jump_latest_button() -> void:
+	if _chat_jump_latest_button != null:
+		_chat_jump_latest_button.visible = not _chat_follow_latest
 
 
 func _truncate_chat_text(text: String, limit: int) -> String:
@@ -2701,6 +2828,9 @@ func _update_chat_ui() -> void:
 		if foreground_busy and _chat_foreground_busy_started_msec > 0:
 			elapsed_seconds = int((Time.get_ticks_msec() - _chat_foreground_busy_started_msec) / 1000)
 		_chat_working_label.text = ChatStatusModel.working_indicator_text(_chat_runtime_state, elapsed_seconds, _chat_last_token_usage)
+	if _chat_trust_indicator != null:
+		_chat_trust_indicator.visible = _chat_trust_mode != "off"
+		_chat_trust_indicator.text = "Trust " + _chat_trust_mode.replace("_", " ")
 	if _chat_connect_button != null:
 		ChatPanelView.apply_button_state(_chat_connect_button, controls.get("connect", {}))
 	if _chat_send_button != null:
@@ -2881,22 +3011,6 @@ func _handle_request(fallback_id: String, request: Dictionary, request_file_name
 		"set_codex_chat_composer_expanded":
 			var composer_result := _set_codex_chat_composer_expanded_request(payload)
 			return _response_from_request_result(request_id, request_type, composer_result, request_file_name)
-
-		"validate_codex_chat_input_multiline":
-			var multiline_result := _validate_codex_chat_input_multiline_request()
-			return _response_from_request_result(request_id, request_type, multiline_result, request_file_name)
-
-		"validate_codex_chat_input_enter_send":
-			var enter_send_result := _validate_codex_chat_input_enter_send_request(payload)
-			return _response_from_request_result(request_id, request_type, enter_send_result, request_file_name)
-
-		"validate_codex_chat_input_long_prompt":
-			var long_prompt_result := _validate_codex_chat_input_long_prompt_request(payload)
-			return _response_from_request_result(request_id, request_type, long_prompt_result, request_file_name)
-
-		"set_bridge_permission":
-			var permission_result := _set_bridge_permission_request(payload)
-			return _response_from_request_result(request_id, request_type, permission_result, request_file_name)
 
 		_:
 			return _response_payload(request_id, request_type, "error", {}, _error_payload(
@@ -3581,9 +3695,39 @@ func _get_codex_chat_layout_status_request() -> Dictionary:
 	var eye_rect := _chat_eye_button.get_global_rect() if _chat_eye_button != null else Rect2()
 	var composer_toggle_rect := _chat_composer_toggle_button.get_global_rect() if _chat_composer_toggle_button != null else Rect2()
 	var advanced_toggle_rect := _chat_advanced_toggle.get_global_rect() if _chat_advanced_toggle != null else Rect2()
+	var connect_button_rect := _chat_connect_button.get_global_rect() if _chat_connect_button != null else Rect2()
 	var frame_rect := _chat_log_frame.get_global_rect()
 	var log_rect := _chat_log_view.get_global_rect()
 	var approval_rect := _chat_approval_panel.get_global_rect() if _chat_approval_panel != null else Rect2()
+	var status_header: Node = _chat_status_label.get_parent() if _chat_status_label != null else null
+	var connect_button_in_status_header := (
+		status_header != null
+		and _chat_connect_button != null
+		and _chat_connect_button.get_parent() == status_header
+		and _chat_advanced_toggle != null
+		and _chat_advanced_toggle.get_parent() == status_header
+	)
+	var editor_main_screen: Control = EditorInterface.get_editor_main_screen()
+	var main_screen_registered := (
+		_main_screen != null
+		and is_instance_valid(_main_screen)
+		and _main_screen.get_parent() == editor_main_screen
+		and _main_screen.is_inside_tree()
+	)
+	var dock_registered := (
+		_dock != null
+		and is_instance_valid(_dock)
+		and _dock.get_parent() != null
+		and _dock.is_inside_tree()
+		and _chat_dock != null
+		and _dock.is_ancestor_of(_chat_dock)
+	)
+	var bottom_panel_registered := (
+		_chat_dock != null
+		and _chat_dock.is_inside_tree()
+		and _chat_dock.get_parent() != null
+		and _chat_dock.get_parent() != _dock
+	)
 	var window_position := DisplayServer.window_get_position()
 	var window_size := DisplayServer.window_get_size()
 	var window_screen := DisplayServer.window_get_current_screen()
@@ -3597,6 +3741,7 @@ func _get_codex_chat_layout_status_request() -> Dictionary:
 			"input_row_rect": input_row_rect,
 			"eye_rect": eye_rect,
 			"composer_toggle_rect": composer_toggle_rect,
+			"connect_button_rect": connect_button_rect,
 			"frame_rect": frame_rect,
 			"log_rect": log_rect,
 			"approval_rect": approval_rect,
@@ -3620,7 +3765,10 @@ func _get_codex_chat_layout_status_request() -> Dictionary:
 			"readiness_label_tooltip": _chat_readiness_label.tooltip_text if _chat_readiness_label != null else "",
 			"advanced_visible": _chat_advanced_panel != null and _chat_advanced_panel.visible,
 			"advanced_toggle_visible": _chat_advanced_toggle != null and _chat_advanced_toggle.is_visible_in_tree(),
+			"advanced_toggle_focus_mode": _chat_advanced_toggle.focus_mode if _chat_advanced_toggle != null else -1,
 			"connect_button_visible": _chat_connect_button != null and _chat_connect_button.is_visible_in_tree(),
+			"connect_button_in_status_header": connect_button_in_status_header,
+			"connect_button_focus_mode": _chat_connect_button.focus_mode if _chat_connect_button != null else -1,
 			"enable_tools_button_visible": _chat_enable_tools_button != null and _chat_enable_tools_button.is_visible_in_tree(),
 			"model_option_visible": _chat_model_option != null and _chat_model_option.is_visible_in_tree(),
 			"reasoning_option_visible": _chat_reasoning_option != null and _chat_reasoning_option.is_visible_in_tree(),
@@ -3630,6 +3778,9 @@ func _get_codex_chat_layout_status_request() -> Dictionary:
 			"attach_screenshot_visible": _chat_attach_screenshot != null and _chat_attach_screenshot.is_visible_in_tree(),
 			"team_review_button_visible": _team_review_button != null and _team_review_button.is_visible_in_tree(),
 			"team_status_visible": _team_status_label != null and _team_status_label.is_visible_in_tree(),
+			"main_screen_registered": main_screen_registered,
+			"dock_registered": dock_registered,
+			"bottom_panel_registered": bottom_panel_registered,
 		},
 		{
 			"connection_state": _chat_connection_state,
@@ -3651,6 +3802,8 @@ func _get_codex_chat_layout_status_request() -> Dictionary:
 			"host_start_in_progress": _host_start_in_progress,
 			"host_process_id": _host_start_process_id,
 			"host_process_owned_by_addon": _host_start_process_id > 0,
+			"last_completed_project_attach_request_id": _chat_last_completed_project_attach_request_id,
+			"last_completed_project_attach_method": _chat_last_completed_project_attach_method,
 			"trust_mode": _chat_trust_mode,
 			"working_indicator_visible": _chat_working_label != null and _chat_working_label.visible,
 			"working_indicator_text": _chat_working_label.text if _chat_working_label != null else "",
@@ -3760,6 +3913,105 @@ func _validate_codex_chat_input_multiline_request() -> Dictionary:
 		"input_scroll_fit_content_height": _chat_input.scroll_fit_content_height,
 		"composer_expanded": _chat_composer_expanded,
 	})
+
+
+func _validate_codex_chat_history_interaction_request() -> Dictionary:
+	if _chat_transcript_view == null or _chat_message_list == null:
+		return _err("chat_ui_unavailable", "Codex Chat transcript is not initialized.")
+	_clear_chat_transcript()
+	_append_chat_user_message("Prašau patikrinti senesnių darbo užrašų elgseną.")
+
+	_record_chat_work_update("Skaitau miesto sceną ir renku tikrus mazgų duomenis.", "replay-work-1")
+	_record_chat_work_update("Tikrinamos ilgos res://world/city/characters/merchant_very_long_resource_name.tscn nuorodos.", "replay-work-2")
+	var first_controls := _chat_active_work_controls.duplicate()
+	var first_body := first_controls.get("body_label", null) as Label
+	var first_toggle := first_controls.get("toggle_button", null) as Button
+	first_toggle.pressed.emit()
+	var first_expanded := first_body != null and first_body.visible
+
+	_reset_chat_work_batch()
+	_append_chat_user_message("Antra užduotis: patikrink sklandų lipimą laiptais.")
+	_record_chat_work_update("Lyginu veikėjo vertikalų judėjimą su laiptų kolizija.", "replay-work-3")
+	var second_controls := _chat_active_work_controls.duplicate()
+	var second_body := second_controls.get("body_label", null) as Label
+	var second_toggle := second_controls.get("toggle_button", null) as Button
+	second_toggle.pressed.emit()
+	second_toggle.pressed.emit()
+	var second_collapsed := second_body != null and not second_body.visible
+	var first_unchanged_after_second := first_body != null and first_body.visible
+
+	_reset_chat_work_batch()
+	_append_chat_user_message("Trečia užduotis: pasiūlyk miesto tekstūrų kryptį.")
+	_record_chat_work_update("Peržiūriu medžiagų spalvas ir paviršių pasikartojimą.", "replay-work-4")
+	var current_body := _chat_active_work_controls.get("body_label", null) as Label
+	first_toggle.pressed.emit()
+	var first_collapsed_during_stream := first_body != null and not first_body.visible
+	_record_chat_work_update(" Naujesnis stream atnaujinimas lieka dabartinėje grupėje.", "replay-work-4")
+	var current_unchanged := current_body != null and not current_body.visible
+	first_toggle.pressed.emit()
+
+	var diff_text := "\n".join([
+		"diff --git a/scripts/player.gd b/scripts/player.gd",
+		"--- a/scripts/player.gd",
+		"+++ b/scripts/player.gd",
+		"@@",
+		"-var stair_snap = 0.0",
+		"+var stair_snap = 0.18",
+		"diff --git a/materials/city_wall.tres b/materials/city_wall.tres",
+		"--- a/materials/city_wall.tres",
+		"+++ b/materials/city_wall.tres",
+		"@@",
+		"-roughness = 0.2",
+		"+roughness = 0.55",
+	])
+	_record_chat_diff_update(diff_text)
+	_set_chat_diff_files_visible(true)
+	var files_box := _chat_active_diff_controls.get("files_box", null) as VBoxContainer
+	var first_file: VBoxContainer = null
+	if files_box != null and files_box.get_child_count() > 0:
+		first_file = files_box.get_child(0) as VBoxContainer
+	var first_file_toggle: Button = null
+	if first_file != null:
+		first_file_toggle = first_file.get_child(0) as Button
+	if first_file_toggle != null:
+		first_file_toggle.pressed.emit()
+	_record_chat_diff_update(diff_text + "\n+velocity.y = lerp(velocity.y, target_y, delta * 12.0)")
+	var rerendered_first_file: VBoxContainer = null
+	if files_box != null and files_box.get_child_count() > 0:
+		rerendered_first_file = files_box.get_child(0) as VBoxContainer
+	var rerendered_details: PanelContainer = null
+	if rerendered_first_file != null:
+		rerendered_details = rerendered_first_file.get_child(1) as PanelContainer
+
+	_append_chat_assistant_delta(
+		"**Replay rezultatas**\n\n- Senos grupės valdomos nepriklausomai.\n- Lietuviškas tekstas išlieka skaitomas.\n\n`res://world/city/materials/very_long_filename_that_must_wrap.tres`\n\n```gdscript\nfunc smooth_step(delta: float) -> void:\n    velocity.y = lerp(velocity.y, target_y, delta * 12.0)\n```",
+		"replay-answer-1",
+		"final_answer"
+	)
+	_flush_chat_assistant_text()
+	_chat_follow_latest = false
+	_update_jump_latest_button()
+	call_deferred("_position_chat_history_for_evidence")
+	return _ok({
+		"evidence_kind": "local_mock_replay",
+		"first_expanded": first_expanded,
+		"second_collapsed": second_collapsed,
+		"first_unchanged_after_second": first_unchanged_after_second,
+		"first_collapsed_during_newer_stream": first_collapsed_during_stream,
+		"current_group_unchanged": current_unchanged,
+		"first_expanded_final": first_body != null and first_body.visible,
+		"diff_file_expansion_survived_stream": rerendered_details != null and rerendered_details.visible,
+		"work_batch_count": int(_chat_message_control_counts().get("work_batch_count", 0)),
+		"jump_latest_visible": _chat_jump_latest_button != null and _chat_jump_latest_button.visible,
+	})
+
+
+func _position_chat_history_for_evidence() -> void:
+	if _chat_log_view == null:
+		return
+	var scroll_bar := _chat_log_view.get_v_scroll_bar()
+	if scroll_bar != null:
+		scroll_bar.value = max(scroll_bar.max_value * 0.35, 0.0)
 
 
 func _validate_codex_chat_input_enter_send_request(payload: Dictionary) -> Dictionary:
@@ -3874,6 +4126,321 @@ func _validate_codex_chat_input_long_prompt_request(payload: Dictionary) -> Dict
 	})
 
 
+func _validate_eye_attach_flow_request() -> Dictionary:
+	if not _permission_enabled("allow_ai_markers"):
+		return _err("permission_disabled", "Eye Attach permission is disabled.")
+	if not _permission_enabled("allow_screenshots"):
+		return _err("permission_denied", "Screenshot permission is disabled in the Codex Bridge dock.")
+	if _annotation_controller == null:
+		return _err("annotation_controller_unavailable", "Eye Attach controller is not initialized.")
+
+	_annotation_controller.clear_pending(false)
+	if _annotation_controller.dialog != null:
+		_annotation_controller.dialog.hide()
+	_annotation_controller.open_eye_attach_dialog()
+
+	var capture: Dictionary = _annotation_controller.source
+	var image: Image = capture.get("image") as Image
+	var capture_succeeded := bool(capture.get("ok", false)) and image != null and not image.is_empty()
+	if not capture_succeeded or _annotation_controller.canvas == null or _annotation_controller.dialog == null:
+		if _annotation_controller.dialog != null:
+			_annotation_controller.dialog.hide()
+		_annotation_controller.clear_pending(false)
+		return _err("annotation_capture_failed", "Eye Attach validation could not capture the editor image.")
+
+	var image_width := image.get_width()
+	var image_height := image.get_height()
+	var first_point := Vector2(maxf(2.0, float(image_width) * 0.10), maxf(2.0, float(image_height) * 0.10))
+	var second_point := Vector2(maxf(first_point.x + 4.0, float(image_width) * 0.25), maxf(first_point.y + 4.0, float(image_height) * 0.25))
+	var validation_marker := {
+		"id": "A",
+		"type": "rectangle",
+		"label": "A",
+		"color": "#ff00ff",
+		"points": [
+			{"x": first_point.x, "y": first_point.y},
+			{"x": second_point.x, "y": second_point.y},
+		],
+	}
+	var dialog_visible_after_open := _annotation_controller.dialog.visible
+	var canvas_has_image_after_open := _annotation_controller.canvas.source_image != null
+	_annotation_controller.canvas.markers.append(validation_marker.duplicate(true))
+	_annotation_controller.canvas.queue_redraw()
+	_annotation_controller.update_status()
+	var marker_count_before_cancel := _annotation_controller.canvas.marker_count()
+	_annotation_controller.dialog.hide()
+	var cancel_left_no_pending := not _annotation_controller.has_pending()
+	var dialog_hidden_after_cancel := not _annotation_controller.dialog.visible
+
+	_annotation_controller.open_eye_attach_dialog()
+	if _annotation_controller.canvas == null or _annotation_controller.canvas.source_image == null:
+		if _annotation_controller.dialog != null:
+			_annotation_controller.dialog.hide()
+		_annotation_controller.clear_pending(false)
+		return _err("annotation_recapture_failed", "Eye Attach validation could not recapture the editor image.")
+	_annotation_controller.canvas.markers.append(validation_marker.duplicate(true))
+	_annotation_controller.canvas.queue_redraw()
+	_annotation_controller.update_status()
+	var marker_count_before_attach := _annotation_controller.canvas.marker_count()
+	_annotation_controller.attach_current_annotation()
+
+	var pending: Dictionary = _annotation_controller.pending()
+	var manifest_path := str(pending.get("manifest_path", ""))
+	var annotated_path := str(pending.get("annotated_path", ""))
+	var raw_path := manifest_path.get_base_dir().path_join("raw.png") if manifest_path != "" else ""
+	var manifest_read := _read_json_file(manifest_path) if manifest_path != "" else {"ok": false}
+	var manifest: Dictionary = manifest_read.get("data", {}) if bool(manifest_read.get("ok", false)) else {}
+	var privacy: Dictionary = manifest.get("privacy", {}) if typeof(manifest.get("privacy", {})) == TYPE_DICTIONARY else {}
+	var manifest_has_guardrails := (
+		str(manifest.get("annotation_version", "")) == AnnotationArtifactModel.ANNOTATION_VERSION
+		and str(manifest.get("annotation_role", "")) == AnnotationArtifactModel.ANNOTATION_ROLE
+		and bool(manifest.get("non_game_overlay", false))
+		and bool(manifest.get("do_not_recreate_marker_graphics", false))
+		and str(manifest.get("instruction", "")) == AnnotationArtifactModel.NON_GAME_INSTRUCTION
+		and not bool(privacy.get("external_upload_allowed", true))
+	)
+	var pending_after_attach := _annotation_controller.has_pending()
+	var pending_label_visible := _annotation_controller.pending_label != null and _annotation_controller.pending_label.visible
+	var clear_button_visible := _annotation_controller.clear_button != null and _annotation_controller.clear_button.visible
+
+	_annotation_controller.clear_pending(false)
+	if _annotation_controller.dialog != null:
+		_annotation_controller.dialog.hide()
+
+	return _ok({
+		"capture_succeeded": capture_succeeded,
+		"capture_scope": str(capture.get("capture_scope", "")),
+		"capture_source": str(capture.get("source", "")),
+		"capture_looked_blank": AnnotationArtifactModel.image_looks_blank(image),
+		"image_width": image_width,
+		"image_height": image_height,
+		"dialog_visible_after_open": dialog_visible_after_open,
+		"canvas_has_image_after_open": canvas_has_image_after_open,
+		"marker_created_for_cancel": marker_count_before_cancel > 0,
+		"marker_count_before_cancel": marker_count_before_cancel,
+		"cancel_left_no_pending": cancel_left_no_pending,
+		"dialog_hidden_after_cancel": dialog_hidden_after_cancel,
+		"marker_created_for_attach": marker_count_before_attach > 0,
+		"marker_count_before_attach": marker_count_before_attach,
+		"pending_after_attach": pending_after_attach,
+		"pending_annotation_id": str(pending.get("annotation_id", "")),
+		"pending_marker_count": int(pending.get("marker_count", 0)),
+		"pending_label_visible": pending_label_visible,
+		"clear_button_visible": clear_button_visible,
+		"raw_exists": raw_path != "" and FileAccess.file_exists(raw_path),
+		"annotated_exists": annotated_path != "" and FileAccess.file_exists(annotated_path),
+		"manifest_exists": manifest_path != "" and FileAccess.file_exists(manifest_path),
+		"manifest_has_guardrails": manifest_has_guardrails,
+		"clear_removed_pending": not _annotation_controller.has_pending(),
+		"pending_label_hidden_after_clear": _annotation_controller.pending_label == null or not _annotation_controller.pending_label.visible,
+		"clear_button_hidden_after_clear": _annotation_controller.clear_button == null or not _annotation_controller.clear_button.visible,
+	})
+
+
+func _validate_codex_chat_diff_overflow_request(payload: Dictionary) -> Dictionary:
+	if _chat_transcript_view == null or _chat_log_view == null or _chat_input == null:
+		return _err("chat_ui_unavailable", "Codex Chat transcript controls are not initialized.")
+	var requested_file_count := clampi(int(payload.get("file_count", 32)), 1, 64)
+	var lines_per_file := clampi(int(payload.get("lines_per_file", 3)), 1, 64)
+	var update_count := clampi(int(payload.get("updates", 4)), 1, 16)
+	var fixture := ChatDiffModel.many_file_overflow_fixture(requested_file_count, lines_per_file)
+	var previous_root := _chat_active_diff_controls.get("root_panel", null) as Control
+	if previous_root != null and is_instance_valid(previous_root):
+		var previous_parent := previous_root.get_parent()
+		if previous_parent != null:
+			previous_parent.remove_child(previous_root)
+		previous_root.queue_free()
+	_reset_chat_diff_batch()
+	for _update_index in range(update_count):
+		_record_chat_diff_update(fixture)
+	_set_chat_diff_files_visible(true)
+	var layout_result := _get_codex_chat_layout_status_request()
+	if not bool(layout_result.get("ok", false)):
+		return layout_result
+	var layout: Dictionary = layout_result.get("data", {})
+	var counts := _chat_message_control_counts()
+	return _ok({
+		"diff_overflow_requested_file_count": requested_file_count,
+		"diff_overflow_generated_file_count": ChatDiffModel.extract_diff_files(fixture).size(),
+		"diff_overflow_ui_file_limit": CHAT_DIFF_MAX_FILES,
+		"diff_overflow_fixture_chars": fixture.length(),
+		"chat_message_count": _chat_message_count(),
+		"chat_diff_preview_count": int(counts.get("diff_preview_count", 0)),
+		"chat_diff_file_section_count": int(counts.get("diff_file_section_count", 0)),
+		"chat_diff_files_box_visible_count": int(counts.get("diff_files_box_visible_count", 0)),
+		"active_diff_file_count": _chat_active_diff_file_count,
+		"active_diff_added_count": _chat_active_diff_added_count,
+		"active_diff_removed_count": _chat_active_diff_removed_count,
+		"active_diff_files_visible": _chat_active_diff_files_visible,
+		"input_visible_in_tree": bool(layout.get("input_visible_in_tree", false)),
+		"input_inside_chat_panel": bool(layout.get("input_inside_chat_panel", false)),
+		"log_inside_chat_panel": bool(layout.get("log_inside_chat_panel", false)),
+		"composer_below_log": bool(layout.get("composer_below_log", false)),
+		"approval_above_input": bool(layout.get("approval_above_input", false)),
+		"input_rect": layout.get("input_rect", {}),
+		"log_frame_rect": layout.get("log_frame_rect", {}),
+		"log_rect": layout.get("log_rect", {}),
+	})
+
+
+func _prepare_codex_chat_diff_visual_evidence_request() -> Dictionary:
+	if _chat_transcript_view == null or _chat_log_view == null:
+		return _err("chat_ui_unavailable", "Codex Chat transcript controls are not initialized.")
+	var files_box := _chat_active_diff_controls.get("files_box", null) as Control
+	if not _chat_active_diff_files_visible or files_box == null or not files_box.visible:
+		_set_chat_diff_files_visible(true)
+	_focus_codex_chat_panel()
+	var target := _active_chat_diff_visual_target()
+	var scroll_before := _chat_log_view.scroll_vertical
+	var target_content_y := _chat_control_content_y_in_scroll(target, _chat_log_view)
+	if target != null and target_content_y >= 0.0:
+		var scroll_bar := _chat_log_view.get_v_scroll_bar()
+		var max_scroll := int(scroll_bar.max_value) if scroll_bar != null else 0
+		_chat_log_view.scroll_vertical = clampi(int(floor(target_content_y - 16.0)), 0, max_scroll)
+		_chat_log_view.queue_redraw()
+		call_deferred("_stabilize_active_chat_diff_visual_scroll")
+	var status := _active_chat_diff_visual_evidence_status()
+	status["scroll_vertical_before"] = scroll_before
+	status["scroll_vertical_after"] = _chat_log_view.scroll_vertical
+	status["scroll_vertical_max"] = int(_chat_log_view.get_v_scroll_bar().max_value) if _chat_log_view.get_v_scroll_bar() != null else 0
+	status["target_content_y"] = target_content_y
+	return _ok(status)
+
+
+func _stabilize_active_chat_diff_visual_scroll() -> void:
+	if _chat_log_view == null:
+		return
+	var target := _active_chat_diff_visual_target()
+	var target_content_y := _chat_control_content_y_in_scroll(target, _chat_log_view)
+	if target == null or target_content_y < 0.0:
+		return
+	var scroll_bar := _chat_log_view.get_v_scroll_bar()
+	var max_scroll := int(scroll_bar.max_value) if scroll_bar != null else 0
+	_chat_log_view.scroll_vertical = clampi(int(floor(target_content_y - 16.0)), 0, max_scroll)
+	_chat_log_view.queue_redraw()
+
+
+func _capture_codex_chat_visual_evidence_request(payload: Dictionary) -> Dictionary:
+	if not _permission_enabled("allow_screenshots"):
+		return _err("permission_denied", "Screenshot permission is disabled in the Codex Bridge dock.")
+	if _annotation_controller == null or _chat_transcript_view == null or _chat_log_view == null or _chat_dock == null:
+		return _err("chat_ui_unavailable", "Codex Chat visual evidence controls are not initialized.")
+	var semantic_target := _active_chat_diff_visual_evidence_status(_chat_dock)
+	if bool(payload.get("require_active_diff", false)) and not bool(semantic_target.get("target_available", false)):
+		return _err("chat_diff_target_unavailable", "The active diff visual target is unavailable.")
+	var capture := _annotation_controller._capture_editor_root_viewport_image()
+	if not bool(capture.get("ok", false)):
+		return {"ok": false, "error": capture.get("error", _error_payload("chat_visual_capture_failed", "Editor capture failed."))}
+	var image: Image = capture.get("image") as Image
+	if image == null or image.is_empty():
+		return _err("chat_visual_capture_failed", "Editor capture returned an empty image.")
+	_ensure_bridge_dirs()
+	var reason := str(payload.get("reason", "codex_chat_visual_evidence")).strip_edges()
+	var file_name := "codex_chat_" + _safe_identifier(reason) + "_" + _file_timestamp() + ".png"
+	var absolute_path := _screenshots_dir_abs.path_join(file_name)
+	if not _permission_enabled("allow_screenshots"):
+		return _err("permission_denied", "Screenshot permission was revoked before the visual evidence artifact was written.")
+	var save_error := image.save_png(absolute_path)
+	if save_error != OK:
+		return _err("chat_visual_save_failed", "Failed to save Codex Chat visual evidence: " + error_string(save_error))
+	return _ok({
+		"artifact": {
+			"absolute_path": absolute_path,
+			"width": image.get_width(),
+			"height": image.get_height(),
+			"looks_blank": AnnotationArtifactModel.image_looks_blank(image),
+			"source": str(capture.get("source", "editor_root_viewport")),
+			"target_window_verified": bool(capture.get("target_window_verified", false)),
+			"occlusion_sensitive": bool(capture.get("occlusion_sensitive", true)),
+			"exclusive_modal_visible": false,
+			"capture_warning": "",
+			"semantic_target": semantic_target,
+		},
+	})
+
+
+func _active_chat_diff_visual_target() -> Control:
+	var files_box := _chat_active_diff_controls.get("files_box", null) as VBoxContainer
+	if files_box == null or not is_instance_valid(files_box):
+		return null
+	for child in files_box.get_children():
+		if child is Control and (child as Control).visible:
+			return child as Control
+	return null
+
+
+func _active_chat_diff_visual_evidence_status(capture_root: Control = null) -> Dictionary:
+	var files_box := _chat_active_diff_controls.get("files_box", null) as Control
+	var target := _active_chat_diff_visual_target()
+	var log_rect := _chat_log_view.get_global_rect() if _chat_log_view != null else Rect2()
+	var root_rect := capture_root.get_global_rect() if capture_root != null else Rect2()
+	var target_rect := target.get_global_rect() if target != null else Rect2()
+	var log_intersection := log_rect.intersection(target_rect)
+	var root_intersection := root_rect.intersection(target_rect)
+	return {
+		"target": "active_diff_first_file",
+		"target_available": target != null,
+		"target_visible_in_tree": target != null and target.is_visible_in_tree(),
+		"files_box_visible_in_tree": files_box != null and files_box.is_visible_in_tree(),
+		"target_intersects_log_view": target != null and log_intersection.size.x > 0.0 and log_intersection.size.y > 0.0,
+		"target_intersects_capture_root": target != null and capture_root != null and root_intersection.size.x > 0.0 and root_intersection.size.y > 0.0,
+		"target_rect": target_rect,
+		"log_view_rect": log_rect,
+		"capture_root_rect": root_rect,
+		"log_intersection_rect": log_intersection,
+		"capture_root_intersection_rect": root_intersection,
+	}
+
+
+func _chat_control_content_y_in_scroll(target: Control, scroll_view: ScrollContainer) -> float:
+	if target == null or scroll_view == null:
+		return -1.0
+	var content_y := 0.0
+	var current: Control = target
+	while current != null and current.get_parent() != scroll_view:
+		content_y += current.position.y
+		current = current.get_parent() as Control
+	return content_y if current != null else -1.0
+
+
+func _activate_codex_chat_primary_action_request() -> Dictionary:
+	if _chat_connect_button == null:
+		return _err("chat_ui_unavailable", "Codex Chat primary action is not initialized.")
+	var status_header := _chat_status_label.get_parent() if _chat_status_label != null else null
+	var request_id_before := _chat_request_id
+	var visible_before := _chat_connect_button.is_visible_in_tree()
+	var advanced_visible_before := _chat_advanced_panel != null and _chat_advanced_panel.visible
+	var action_text_before := _chat_connect_button.text
+	var handler_count_before := 0
+	_chat_connect_button.pressed.emit()
+	var attach_request_id_after := -1
+	var attach_request_method := ""
+	for candidate_id in _chat_request_methods.keys():
+		var numeric_id := int(candidate_id)
+		var method := str(_chat_request_methods.get(candidate_id, ""))
+		if numeric_id > request_id_before and method in ["project.attach", "host.restart_for_project"]:
+			attach_request_id_after = numeric_id
+			attach_request_method = method
+			break
+	var signal_handled := attach_request_id_after > request_id_before
+	return _ok({
+		"signal_emitted": true,
+		"signal_handled": signal_handled,
+		"handler_count_before": handler_count_before,
+		"handler_count_after": handler_count_before + (1 if signal_handled else 0),
+		"handler_count_delta": 1 if signal_handled else 0,
+		"attach_request_id_before": request_id_before,
+		"attach_request_id_after": attach_request_id_after,
+		"attach_request_sent": signal_handled,
+		"attach_request_method": attach_request_method,
+		"visible_before": visible_before,
+		"in_status_header": status_header != null and _chat_connect_button.get_parent() == status_header,
+		"focus_mode": _chat_connect_button.focus_mode,
+		"advanced_visible_before": advanced_visible_before,
+		"action_text_before": action_text_before,
+	})
+
+
 func _rect_contains(container_rect: Rect2, child_rect: Rect2) -> bool:
 	return (
 		child_rect.position.x >= container_rect.position.x
@@ -3901,30 +4468,6 @@ func _window_rect_payload(window: Window) -> Dictionary:
 		"width": window.size.x,
 		"height": window.size.y,
 	}
-
-
-func _set_bridge_permission_request(payload: Dictionary) -> Dictionary:
-	if str(payload.get("validation_token", payload.get("validationToken", ""))) != VALIDATION_PERMISSION_TOKEN:
-		return _err("validation_token_required", "set_bridge_permission is only available to local validation scripts with the validation token.")
-	var key := str(payload.get("key", "")).strip_edges()
-	if key == "" or not _permissions.has(key):
-		return _err("invalid_permission_key", "Unknown bridge permission key: " + key)
-	var value := bool(payload.get("value", false))
-	var previous := bool(_permissions.get(key, false))
-	_permissions[key] = value
-	_write_permissions()
-	_update_ui()
-	_log_event("permission_changed_for_validation", {
-		"key": key,
-		"previous": previous,
-		"value": value,
-	})
-	return _ok({
-		"key": key,
-		"previous": previous,
-		"value": value,
-		"permissions_path": PERMISSIONS_PATH,
-	})
 
 
 func _codex_chat_request(request_type: String, payload: Dictionary = {}) -> Dictionary:
@@ -4000,13 +4543,6 @@ func _apply_chat_request_effects(effects: Array) -> void:
 				_run_team_review()
 			"cancel_team_review":
 				_cancel_team_review()
-			"set_approval_note":
-				if _chat_approval_note != null:
-					_chat_approval_note.text = str(effect_dict.get("text", ""))
-			"respond_to_approval":
-				_respond_to_chat_approval(str(effect_dict.get("decision", "reject")))
-
-
 func _chat_request_state() -> Dictionary:
 	return ChatRequestModel.request_state({
 		"chat_request_id": _chat_request_id,
@@ -4670,4 +5206,3 @@ func _safe_identifier(value: String) -> String:
 		else:
 			safe += "_"
 	return safe.strip_edges().substr(0, 128) if safe.strip_edges() != "" else "artifact"
-

@@ -7,15 +7,15 @@ Thank you for your interest in contributing to Godot Codex Bridge! This guide co
 ## Quick Setup
 
 Requirements:
-- **Node.js**: `>=20.11` (Node 20 LTS or Node 22 recommended)
-- **Godot Engine**: `4.3` or later (for addon validation)
+- **Node.js**: `>=22.14` (Node 24 LTS recommended; CI covers Node 22 and 24)
+- **Godot Engine**: `4.7.1` is the tested baseline. Other releases require validation.
 - **Git**
 
 From the repository root:
 
 ```bash
 # 1. Install root and workspace dependencies
-npm install
+npm ci
 
 # 2. Compile TypeScript packages (MCP server & Codex host)
 npm run build
@@ -30,9 +30,13 @@ npm test
 
 From the repository root:
 - `npm test` — runs both MCP server and Codex host test suites.
-- `npm run test:mcp` — runs the 127+ MCP tool and server tests.
-- `npm run test:host` — runs the 46+ Codex Host tests.
-- `npm run validate:addon-core` — runs the 64 Godot addon GDScript test suites headlessly (requires Godot 4.3+ on `PATH` or configured via `GODOT_BIN`).
+- `npm run test:mcp` — runs the MCP tool and server tests.
+- `npm run test:host` — runs the Codex Host tests, including protocol and local transport boundaries.
+- `npm run validate:addon-core` — runs the Godot addon GDScript suites headlessly (tested on Godot 4.7.1, configured via `GODOT_BIN` or `PATH`).
+
+CI runs Node tests on Windows and Ubuntu with Node 22/24, plus a Windows
+headless addon job using a checksum-pinned Godot 4.7.1 download. Headless tests
+do not prove visible UI behavior or a real authenticated Codex conversation.
 
 Package-local commands remain fully supported if working directly within a package directory:
 - `cd godot-codex-bridge/mcp_server && npm test`
@@ -52,7 +56,9 @@ The MCP tool schemas (`godot.*`) form the public interface with AI coding agents
 - **Read-First Philosophy**: Keep tools read-only by default.
 - **UndoRedo Guarantee**: Any mutating editor action must execute through Godot's native `UndoRedo` stack.
 - **Path Guard**: Never bypass `isInsidePath` checks or access files outside the targeted Godot project root.
-- **Local-Only**: Do not introduce network calls, cloud dependencies, external telemetry, or analytics.
+- **Local transport**: Keep the Godot/MCP/Host bridge on loopback. Codex itself
+  uses the user's configured model provider; do not add telemetry or new
+  external destinations. Browser clients and remote Host binds are unsupported.
 
 ### 3. Godot Engine Compatibility
 - Use modern Godot 4.x idioms (GDScript 2.0 with static typing).

@@ -22,12 +22,15 @@ test("visual regression baseline and compare exact match", async () => {
     screenshotPath: pngPath,
     baselineName: "main",
   });
+  await installBaseline(bridgeDir, "main", ONE_BY_ONE_PNG);
   const comparison = await compareVisualRegression(bridgeDir, {
     currentScreenshotPath: pngPath,
     baselineName: "main",
   });
 
-  assert.equal(baseline.status, "ok");
+  assert.equal(baseline.status, "bridge_unavailable");
+  assert.equal(baseline.created, false);
+  assert.equal(baseline.error?.code, "trusted_screenshot_permission_unavailable");
   assert.equal(comparison.status, "ok");
   assert.equal(comparison.exact_match, true);
   assert.equal(comparison.dimensions_match, true);
@@ -49,10 +52,11 @@ test("visual regression reports pixel differences for matching 8-bit RGBA PNGs",
     [0, 0, 255, 255],
   ]));
 
-  await createVisualBaseline(bridgeDir, {
+  const baseline = await createVisualBaseline(bridgeDir, {
     screenshotPath: baselinePath,
     baselineName: "pixels",
   });
+  await installBaseline(bridgeDir, "pixels", await fs.readFile(baselinePath));
   const comparison = await compareVisualRegression(bridgeDir, {
     currentScreenshotPath: currentPath,
     baselineName: "pixels",
@@ -65,6 +69,8 @@ test("visual regression reports pixel differences for matching 8-bit RGBA PNGs",
     changed_ratio: number;
     rgba_channel_max_delta: number;
   };
+  assert.equal(baseline.status, "bridge_unavailable");
+  assert.equal(baseline.created, false);
   assert.equal(comparison.status, "ok");
   assert.equal(comparison.exact_match, false);
   assert.equal(comparison.dimensions_match, true);
@@ -74,6 +80,12 @@ test("visual regression reports pixel differences for matching 8-bit RGBA PNGs",
   assert.equal(pixelDiff.changed_ratio, 0.5);
   assert.equal(pixelDiff.rgba_channel_max_delta, 255);
 });
+
+async function installBaseline(bridgeDir: string, name: string, contents: Buffer): Promise<void> {
+  const baselineRoot = path.join(bridgeDir, "artifacts", "visual_regression", "baselines", name);
+  await fs.mkdir(baselineRoot, { recursive: true });
+  await fs.writeFile(path.join(baselineRoot, "baseline.png"), contents);
+}
 
 function makeRgbaPng(width: number, height: number, pixels: Array<[number, number, number, number]>): Buffer {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

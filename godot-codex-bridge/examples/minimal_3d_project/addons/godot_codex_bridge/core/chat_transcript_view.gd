@@ -15,16 +15,20 @@ var _bottom_spacer: Control
 var _scroll_callback: Callable
 var _detail_callback: Callable
 var _assistant_streaming := false
-var _assistant_label: Label
+var _assistant_label: RichTextLabel
 var _assistant_text := ""
 var _assistant_item_id := ""
 var _assistant_phase := ""
 var _assistant_dirty := false
 var _last_assistant_flush_msec := 0
 var _last_status_text := ""
-var _last_status_label: Label
+var _last_status_label: RichTextLabel
 var _last_status_msec := 0
 var _last_status_repeat_count := 0
+var _diagnostics_label: RichTextLabel
+var _diagnostics_entries: Array[String] = []
+var _last_diagnostic_text := ""
+var _last_diagnostic_repeat_count := 0
 var _work_panel: PanelContainer
 var _work_controls := {}
 var _work_state := {}
@@ -62,6 +66,7 @@ static func empty_control_counts() -> Dictionary:
 		"diff_files_box_visible_count": 0,
 		"work_batch_count": 0,
 		"work_details_visible_count": 0,
+		"diagnostics_count": 0,
 		"bridge_tools_enabled_status_count": 0,
 		"refreshing_tools_status_count": 0,
 	}
@@ -94,7 +99,7 @@ func create_copy_button(tooltip: String) -> Button:
 	return copy_button
 
 
-func append_user_message(text: String) -> Label:
+func append_user_message(text: String) -> RichTextLabel:
 	_reset_status_coalescing()
 	var style := ChatThemeModel.bubble_style("user", _palette)
 	return append_bubble(
@@ -105,16 +110,18 @@ func append_user_message(text: String) -> Label:
 	)
 
 
-func append_user_turn(text: String, now_msec := 0) -> Label:
+func append_user_turn(text: String, now_msec := 0) -> RichTextLabel:
 	flush_assistant_text(now_msec)
 	reset_assistant_stream(false, now_msec)
 	return append_user_message(text)
 
 
-func append_status_message(text: String, now_msec := 0) -> Label:
+func append_status_message(text: String, now_msec := 0) -> RichTextLabel:
 	var trimmed := text.strip_edges()
 	if trimmed == "":
 		return null
+	if _is_routine_diagnostic(trimmed):
+		return _append_routine_diagnostic(trimmed)
 	if now_msec <= 0:
 		now_msec = Time.get_ticks_msec()
 	var coalesce_window := int(_limits.get("status_coalesce_msec", 2500))
@@ -146,6 +153,45 @@ func append_status_message(text: String, now_msec := 0) -> Label:
 	return label
 
 
+func _is_routine_diagnostic(text: String) -> bool:
+	return (
+		text.begins_with("Connecting to Codex automatically.")
+		or text == "Connected to Codex."
+		or text == "Codex reconnected."
+		or text == "Refreshing Codex project attachment..."
+		or text.begins_with("Refreshing Godot Bridge tools for this project...")
+		or text.begins_with("Enabling Godot Bridge tools for this Codex runtime...")
+		or text.begins_with("Bridge tools enabled.")
+	)
+
+
+func _append_routine_diagnostic(text: String) -> RichTextLabel:
+	if text == _last_diagnostic_text and not _diagnostics_entries.is_empty():
+		_last_diagnostic_repeat_count += 1
+		_diagnostics_entries[_diagnostics_entries.size() - 1] = text + " (repeated " + str(_last_diagnostic_repeat_count) + " times)"
+	else:
+		_last_diagnostic_text = text
+		_last_diagnostic_repeat_count = 1
+		_diagnostics_entries.append(text)
+		if _diagnostics_entries.size() > 12:
+			_diagnostics_entries.pop_front()
+	var combined := "\n".join(_diagnostics_entries)
+	if _diagnostics_label != null and is_instance_valid(_diagnostics_label):
+		set_bubble_text(_diagnostics_label, combined)
+		return _diagnostics_label
+	var style := ChatThemeModel.bubble_style("status", _palette)
+	_diagnostics_label = append_bubble(
+		"Diagnostics",
+		combined,
+		style.get("background", Color(0.16, 0.16, 0.16)),
+		style.get("accent", Color(0.28, 0.28, 0.28)),
+		true
+	)
+	if _diagnostics_label != null:
+		_diagnostics_label.set_meta("chat_diagnostics", true)
+	return _diagnostics_label
+
+
 func show_copy_feedback(copy_button: Button) -> void:
 	if copy_button == null:
 		return
@@ -162,7 +208,7 @@ func show_copy_feedback(copy_button: Button) -> void:
 	)
 
 
-func append_bubble(author: String, text: String, background: Color, accent: Color, force_collapsed: bool = false) -> Label:
+func append_bubble(author: String, text: String, background: Color, accent: Color, force_collapsed: bool = false) -> RichTextLabel:
 	if _message_list == null:
 		return null
 
@@ -214,9 +260,13 @@ func append_bubble(author: String, text: String, background: Color, accent: Colo
 	var copy_button := create_copy_button("Copy the full message text to clipboard.")
 	header_row.add_child(copy_button)
 
-	var body := Label.new()
+	var body := RichTextLabel.new()
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.fit_content = true
+	body.scroll_active = false
+	body.selection_enabled = true
+	body.bbcode_enabled = true
 	body.add_theme_color_override("font_color", _palette.get("body_font", Color(0.86, 0.86, 0.86)))
 	content.add_child(body)
 
@@ -271,14 +321,6 @@ func append_assistant_delta(text: String, item_id: String = "", phase: String = 
 			_assistant_phase = normalized_phase
 
 	_assistant_text += text
-	var section_limit := int(_limits.get("assistant_section_chars", 2200))
-	while section_limit > 0 and _assistant_text.length() > section_limit:
-		var split_at := ChatTranscriptModel.find_assistant_section_split(_assistant_text, section_limit)
-		var chunk := _assistant_text.substr(0, split_at).strip_edges(false, true)
-		if _assistant_label != null and is_instance_valid(_assistant_label):
-			set_bubble_text(_assistant_label, chunk)
-		_assistant_text = _assistant_text.substr(split_at).strip_edges(true, false)
-		_assistant_label = _append_assistant_bubble(_assistant_phase)
 	_assistant_dirty = true
 	var flush_interval := int(_limits.get("assistant_flush_interval_msec", 50))
 	if now_msec <= 0 or now_msec - _last_assistant_flush_msec >= flush_interval:
@@ -540,9 +582,12 @@ func _apply_diff_state(state: Dictionary) -> void:
 func _ensure_work_panel() -> PanelContainer:
 	if _work_panel != null and is_instance_valid(_work_panel):
 		return _work_panel
+	var owned_controls := {}
 	_work_controls = append_work_batch(func() -> void:
-		set_work_visible(not bool(_work_state.get("visible", false)))
+		if owned_controls == _work_controls:
+			set_work_visible(_work_control_visible(owned_controls))
 	)
+	owned_controls = _work_controls
 	_work_panel = _work_controls.get("panel", null) as PanelContainer
 	return _work_panel
 
@@ -550,9 +595,12 @@ func _ensure_work_panel() -> PanelContainer:
 func _ensure_diff_panel() -> VBoxContainer:
 	if _diff_panel != null and is_instance_valid(_diff_panel):
 		return _diff_panel
+	var owned_controls := {}
 	_diff_controls = append_diff_batch(func() -> void:
-		set_diff_files_visible(not bool(_diff_state.get("files_visible", false)))
+		if owned_controls == _diff_controls:
+			set_diff_files_visible(_diff_control_visible(owned_controls))
 	)
+	owned_controls = _diff_controls
 	_diff_panel = _diff_controls.get("files_box", null) as VBoxContainer
 	return _diff_panel
 
@@ -653,18 +701,21 @@ func append_work_batch(toggle_callback: Callable = Callable()) -> Dictionary:
 		_log_detail("Copied work notes to clipboard (" + str(full_text.length()) + " chars).")
 		show_copy_feedback(copy_button)
 	)
-	toggle_button.pressed.connect(func() -> void:
-		if toggle_callback.is_valid():
-			toggle_callback.call()
-	)
-
-	append_panel(panel)
-	return {
+	var controls := {
 		"panel": panel,
 		"summary_label": summary_label,
 		"toggle_button": toggle_button,
 		"body_label": body_label,
 	}
+	toggle_button.pressed.connect(func() -> void:
+		var next_visible := not body_label.visible
+		set_work_batch_visible(controls, int(panel.get_meta("chat_work_updates", 0)), next_visible)
+		if toggle_callback.is_valid():
+			toggle_callback.call()
+	)
+
+	append_panel(panel)
+	return controls
 
 
 func append_diff_batch(toggle_callback: Callable = Callable()) -> Dictionary:
@@ -739,18 +790,21 @@ func append_diff_batch(toggle_callback: Callable = Callable()) -> Dictionary:
 		_log_detail("Copied diff preview to clipboard (" + str(full_text.length()) + " chars).")
 		show_copy_feedback(copy_button)
 	)
-	toggle_button.pressed.connect(func() -> void:
-		if toggle_callback.is_valid():
-			toggle_callback.call()
-	)
-
-	append_panel(panel)
-	return {
+	var controls := {
 		"root_panel": panel,
 		"files_box": files_box,
 		"summary_label": summary_label,
 		"toggle_button": toggle_button,
 	}
+	toggle_button.pressed.connect(func() -> void:
+		var next_visible := not files_box.visible
+		set_diff_batch_visible(controls, int(panel.get_meta("chat_diff_file_count", 0)), next_visible)
+		if toggle_callback.is_valid():
+			toggle_callback.call()
+	)
+
+	append_panel(panel)
+	return controls
 
 
 func update_work_batch(controls: Dictionary, updates: int, text: String, visible: bool) -> String:
@@ -771,6 +825,10 @@ func update_work_batch(controls: Dictionary, updates: int, text: String, visible
 		(body_label as Label).text = full_text
 		(body_label as Label).set_meta("chat_full_text", full_text)
 		(body_label as Label).visible = visible
+	var panel: Variant = controls.get("panel", null)
+	if panel is Control and is_instance_valid(panel):
+		(panel as Control).set_meta("chat_work_updates", updates)
+		(panel as Control).set_meta("chat_work_visible", visible)
 	_request_scroll()
 	return full_text
 
@@ -807,6 +865,7 @@ func update_diff_batch(controls: Dictionary, updates: int, diff_text: String, fi
 		(toggle_button as Button).disabled = parsed_files.is_empty()
 
 	var files_box_node := files_box as VBoxContainer
+	var expanded_paths: Dictionary = controls.get("expanded_paths", {}) as Dictionary
 	files_box_node.visible = files_visible and not parsed_files.is_empty()
 	files_box_node.set_meta("chat_full_diff_text", diff_text)
 	ChatDiffView.clear_children(files_box_node)
@@ -817,8 +876,25 @@ func update_diff_batch(controls: Dictionary, updates: int, diff_text: String, fi
 		empty_label.add_theme_color_override("font_color", _palette.get("muted_font", Color(0.74, 0.74, 0.74)))
 		files_box_node.add_child(empty_label)
 	else:
+		var path_occurrences := {}
 		for file_data in parsed_files:
-			files_box_node.add_child(ChatDiffView.create_file_section(file_data, _scroll_callback, _palette))
+			var normalized_path := ChatDiffModel.normalize_diff_file_path(str(file_data.get("path", "unknown file")))
+			var occurrence := int(path_occurrences.get(normalized_path, 0))
+			path_occurrences[normalized_path] = occurrence + 1
+			var row_key := normalized_path + "#" + str(occurrence)
+			files_box_node.add_child(ChatDiffView.create_file_section(
+				file_data,
+				Callable(),
+				_palette,
+				bool(expanded_paths.get(row_key, false)),
+				func(expanded: bool) -> void:
+					expanded_paths[row_key] = expanded
+			))
+	controls["expanded_paths"] = expanded_paths
+	var root_panel: Variant = controls.get("root_panel", null)
+	if root_panel is Control and is_instance_valid(root_panel):
+		(root_panel as Control).set_meta("chat_diff_file_count", file_count)
+		(root_panel as Control).set_meta("chat_diff_files_visible", files_visible)
 	_request_scroll()
 	return {
 		"parsed_files": parsed_files,
@@ -835,7 +911,9 @@ func set_work_batch_visible(controls: Dictionary, updates: int, visible: bool) -
 	var toggle_button: Variant = controls.get("toggle_button", null)
 	if toggle_button is Button and is_instance_valid(toggle_button):
 		(toggle_button as Button).text = ChatTranscriptModel.work_batch_toggle_text(visible, updates)
-	_request_scroll()
+	var panel: Variant = controls.get("panel", null)
+	if panel is Control and is_instance_valid(panel):
+		(panel as Control).set_meta("chat_work_visible", visible)
 
 
 func set_diff_batch_visible(controls: Dictionary, file_count: int, visible: bool) -> void:
@@ -845,7 +923,19 @@ func set_diff_batch_visible(controls: Dictionary, file_count: int, visible: bool
 	var toggle_button: Variant = controls.get("toggle_button", null)
 	if toggle_button is Button and is_instance_valid(toggle_button):
 		(toggle_button as Button).text = ChatDiffModel.batch_toggle_text(visible, file_count)
-	_request_scroll()
+	var root_panel: Variant = controls.get("root_panel", null)
+	if root_panel is Control and is_instance_valid(root_panel):
+		(root_panel as Control).set_meta("chat_diff_files_visible", visible)
+
+
+func _work_control_visible(controls: Dictionary) -> bool:
+	var body: Variant = controls.get("body_label", null)
+	return body is Control and is_instance_valid(body) and (body as Control).visible
+
+
+func _diff_control_visible(controls: Dictionary) -> bool:
+	var files: Variant = controls.get("files_box", null)
+	return files is Control and is_instance_valid(files) and (files as Control).visible
 
 
 func append_panel(panel: Control) -> void:
@@ -865,7 +955,7 @@ func _reset_status_coalescing() -> void:
 	_last_status_repeat_count = 0
 
 
-func set_bubble_text(body: Label, text: String) -> void:
+func set_bubble_text(body: RichTextLabel, text: String) -> void:
 	if body == null:
 		return
 	var full_text := ChatTranscriptModel.truncate_text(text, int(_limits.get("max_message_chars", 65536)))
@@ -887,10 +977,12 @@ func set_bubble_text(body: Label, text: String) -> void:
 	if collapse_button is Button:
 		(collapse_button as Button).visible = can_collapse
 		(collapse_button as Button).text = "More" if collapsed else "Less"
-	body.text = _body_display_text(full_text, collapsed, force_collapsed)
+	var rendered := ChatTranscriptModel.safe_rich_text(_body_display_text(full_text, collapsed, force_collapsed))
+	body.set_meta("chat_rendered_bbcode", rendered)
+	body.text = rendered
 
 
-func toggle_message_collapse(body: Label) -> void:
+func toggle_message_collapse(body: RichTextLabel) -> void:
 	if body == null:
 		return
 	var full_text := str(body.get_meta("chat_full_text", body.text))
@@ -907,11 +999,12 @@ func toggle_message_collapse(body: Label) -> void:
 	var collapse_button: Variant = body.get_meta("chat_collapse_button", null)
 	if collapse_button is Button:
 		(collapse_button as Button).text = "More" if collapsed else "Less"
-	body.text = _body_display_text(full_text, collapsed, force_collapsed)
-	_request_scroll()
+	var rendered := ChatTranscriptModel.safe_rich_text(_body_display_text(full_text, collapsed, force_collapsed))
+	body.set_meta("chat_rendered_bbcode", rendered)
+	body.text = rendered
 
 
-func copy_message(body: Label, copy_button: Button) -> void:
+func copy_message(body: RichTextLabel, copy_button: Button) -> void:
 	if body == null:
 		return
 	var full_text := str(body.get_meta("chat_full_text", body.text))
@@ -920,7 +1013,7 @@ func copy_message(body: Label, copy_button: Button) -> void:
 	show_copy_feedback(copy_button)
 
 
-func _append_assistant_bubble(phase: String) -> Label:
+func _append_assistant_bubble(phase: String) -> RichTextLabel:
 	var style := ChatTranscriptModel.assistant_style(phase)
 	var bubble_kind := "work" if str(style.get("author", "Codex")) == "Work" else "assistant"
 	var bubble_style := ChatThemeModel.bubble_style(bubble_kind, _palette)
@@ -954,6 +1047,11 @@ func clear_messages() -> void:
 		_message_list.add_child(_bottom_spacer)
 	if _bottom_spacer != null and _bottom_spacer.get_parent() == _message_list:
 		_message_list.move_child(_bottom_spacer, _message_list.get_child_count() - 1)
+	_reset_status_coalescing()
+	_diagnostics_label = null
+	_diagnostics_entries.clear()
+	_last_diagnostic_text = ""
+	_last_diagnostic_repeat_count = 0
 	_request_scroll()
 
 
@@ -992,6 +1090,8 @@ func _collect_control_counts(node: Node, counts: Dictionary) -> void:
 		counts["diff_expanded_file_section_count"] = int(counts.get("diff_expanded_file_section_count", 0)) + 1
 	if node.has_meta("chat_work_batch"):
 		counts["work_batch_count"] = int(counts.get("work_batch_count", 0)) + 1
+	if node.has_meta("chat_diagnostics"):
+		counts["diagnostics_count"] = int(counts.get("diagnostics_count", 0)) + 1
 	if node.has_meta("chat_work_details") and node is Control and (node as Control).visible:
 		counts["work_details_visible_count"] = int(counts.get("work_details_visible_count", 0)) + 1
 	if node.has_meta("chat_copy_icon_button") and node is Button:
@@ -1000,21 +1100,22 @@ func _collect_control_counts(node: Node, counts: Dictionary) -> void:
 		counts["copy_button_count"] = int(counts.get("copy_button_count", 0)) + 1
 		counts["copy_icon_button_max_width"] = max(float(counts.get("copy_icon_button_max_width", 0.0)), copy_button.custom_minimum_size.x)
 		counts["copy_icon_button_max_height"] = max(float(counts.get("copy_icon_button_max_height", 0.0)), copy_button.custom_minimum_size.y)
-	if node is Label:
-		var label := node as Label
+	if node is Label or node is RichTextLabel:
+		var label := node as Control
 		var author := str(label.get_meta("chat_author", ""))
-		var full_text := str(label.get_meta("chat_full_text", label.text))
-		if author == "Status":
-			if full_text.begins_with("Bridge tools enabled."):
+		var display_text := (label as Label).text if label is Label else (label as RichTextLabel).text
+		var full_text := str(label.get_meta("chat_full_text", display_text))
+		if author == "Status" or author == "Diagnostics":
+			if full_text.contains("Bridge tools enabled."):
 				counts["bridge_tools_enabled_status_count"] = int(counts.get("bridge_tools_enabled_status_count", 0)) + 1
-			if full_text == "Refreshing Godot Bridge tools for this project...":
+			if full_text.contains("Refreshing Godot Bridge tools for this project..."):
 				counts["refreshing_tools_status_count"] = int(counts.get("refreshing_tools_status_count", 0)) + 1
 		if label.has_meta("chat_copy_button"):
 			var label_copy_button: Variant = label.get_meta("chat_copy_button", null)
 			if not (label_copy_button is Button) or not (label_copy_button as Button).has_meta("chat_copy_icon_button"):
 				counts["copy_button_count"] = int(counts.get("copy_button_count", 0)) + 1
 		if label.has_meta("chat_collapse_button"):
-			var collapse_full_text := str(label.get_meta("chat_full_text", label.text))
+			var collapse_full_text := str(label.get_meta("chat_full_text", display_text))
 			if ChatTranscriptModel.should_collapse_text(
 				collapse_full_text,
 				int(_limits.get("collapse_chars", 1200)),

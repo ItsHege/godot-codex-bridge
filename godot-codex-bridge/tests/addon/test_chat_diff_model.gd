@@ -61,8 +61,7 @@ func _run() -> void:
 	_assert_true(summary.find("... 1 more") >= 0, "summary limits paths")
 
 	var batch_summary := ChatDiffModel.batch_summary(3, parsed, 1)
-	_assert_true(batch_summary.find("3 update(s), 2 file(s), +2 -1") >= 0, "batch summary counts updates files and lines")
-	_assert_true(batch_summary.find("Show files") >= 0, "batch summary explains expandable files")
+	_assert_eq(batch_summary, "2 files changed · +2 / -1", "batch summary is compact without transport update counters")
 	_assert_eq(ChatDiffModel.batch_toggle_text(false, 2), "Show 2 files", "collapsed batch toggle text")
 	_assert_eq(ChatDiffModel.batch_toggle_text(true, 2), "Hide files", "expanded batch toggle text")
 

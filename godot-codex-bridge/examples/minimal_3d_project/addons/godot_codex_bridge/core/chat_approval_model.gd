@@ -99,6 +99,42 @@ static func response_payload(params: Dictionary, decision: String, note: String)
 	}
 
 
+static func resolution_matches(params: Dictionary, resolution: Dictionary) -> bool:
+	if params.is_empty():
+		return false
+	var resolution_approval_id := str(resolution.get("approval_id", "")).strip_edges()
+	if resolution_approval_id != "":
+		var active_approval_id := str(params.get("approval_id", "")).strip_edges()
+		return active_approval_id != "" and active_approval_id == resolution_approval_id
+	var resolution_runtime_id := str(resolution.get("runtime_approval_id", "")).strip_edges()
+	if resolution_runtime_id == "":
+		return false
+	var active_runtime_id := str(params.get("runtime_approval_id", "")).strip_edges()
+	return active_runtime_id != "" and active_runtime_id == resolution_runtime_id
+
+
+static func interrupted_turn_matches(params: Dictionary, interruption: Dictionary) -> bool:
+	if params.is_empty():
+		return false
+	var active_turn_id := str(params.get("turn_id", "")).strip_edges()
+	var interrupted_turn_id := str(interruption.get("turn_id", "")).strip_edges()
+	return active_turn_id != "" and interrupted_turn_id != "" and active_turn_id == interrupted_turn_id
+
+
+static func resolution_message(method: String, resolution: Dictionary) -> String:
+	if method == "approval.expired":
+		return "Approval expired; files left unchanged."
+	var outcome := ""
+	for key in ["decision", "status", "reason"]:
+		if resolution.get(key) != null:
+			outcome = str(resolution.get(key, "")).strip_edges()
+			if outcome != "":
+				break
+	if outcome == "":
+		outcome = "unknown"
+	return "Approval resolved: " + outcome
+
+
 static func show_plan(params: Dictionary, active_diff_text: String) -> Dictionary:
 	var diff_text := ""
 	if params.has("file_changes") and params.get("file_changes") != null and active_diff_text.strip_edges() == "":
@@ -217,7 +253,8 @@ static func response_plan(params: Dictionary, decision: String, note: String, so
 	if params.is_empty():
 		return {
 			"ok": false,
-			"action": "ignore",
+			"action": "status",
+			"system_message": "Approval is no longer active; response was not sent.",
 		}
 	if not socket_ready:
 		return {

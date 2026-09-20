@@ -45,6 +45,25 @@ func clear_pending(show_status := false) -> void:
 		ctx.append_status("Marker attachment removed.")
 
 
+func invalidate_sensitive_capture(message := "Screenshot permission was revoked; the pending Eye Attach capture was discarded.") -> void:
+	source.clear()
+	pending_annotation.clear()
+	if canvas != null:
+		canvas.clear_source_image()
+	if dialog != null:
+		dialog.hide()
+	update_pending_ui()
+	if message != "":
+		ctx.append_status(message)
+
+
+func _screenshot_permission_error() -> Dictionary:
+	return {
+		"ok": false,
+		"error": ctx.err("permission_denied", "Screenshot permission is disabled in the Codex Bridge dock."),
+	}
+
+
 func status_payload() -> Dictionary:
 	return {
 		"pending_annotation": has_pending(),
@@ -59,6 +78,9 @@ func status_payload() -> Dictionary:
 func open_eye_attach_dialog() -> void:
 	if not ctx.permission_enabled("allow_ai_markers"):
 		ctx.append_status("Eye Attach permission is disabled.")
+		return
+	if not ctx.permission_enabled("allow_screenshots"):
+		invalidate_sensitive_capture("Screenshot permission is disabled; Eye Attach capture was not opened.")
 		return
 	ensure_dialog()
 	var capture := capture_annotation_source(selected_scope())
@@ -281,6 +303,9 @@ func update_window_size_button() -> void:
 func recapture_annotation_source() -> void:
 	if canvas == null:
 		return
+	if not ctx.permission_enabled("allow_screenshots"):
+		invalidate_sensitive_capture()
+		return
 	var was_visible := dialog != null and dialog.visible
 	var previous_position := Vector2i.ZERO
 	var previous_size := Vector2i.ZERO
@@ -329,6 +354,8 @@ func selected_tool() -> String:
 
 
 func capture_annotation_source(scope: String) -> Dictionary:
+	if not ctx.permission_enabled("allow_screenshots"):
+		return _screenshot_permission_error()
 	ctx.ensure_dirs()
 	if DisplayServer.get_name().to_lower() == "headless":
 		return {
@@ -362,6 +389,8 @@ func capture_annotation_source(scope: String) -> Dictionary:
 
 
 func capture_editor_window_image() -> Dictionary:
+	if not ctx.permission_enabled("allow_screenshots"):
+		return _screenshot_permission_error()
 	var window_position := DisplayServer.window_get_position()
 	var window_size := DisplayServer.window_get_size()
 	if window_size.x <= 0 or window_size.y <= 0:
@@ -394,6 +423,8 @@ func capture_editor_window_image() -> Dictionary:
 
 
 func _capture_editor_root_viewport_image() -> Dictionary:
+	if not ctx.permission_enabled("allow_screenshots"):
+		return _screenshot_permission_error()
 	var base_control := EditorInterface.get_base_control()
 	if base_control == null:
 		return {
@@ -429,6 +460,8 @@ func _capture_editor_root_viewport_image() -> Dictionary:
 
 
 func capture_editor_viewport_image(scope: String) -> Dictionary:
+	if not ctx.permission_enabled("allow_screenshots"):
+		return _screenshot_permission_error()
 	var viewport: SubViewport = null
 	var source_name := "editor_3d_viewport"
 	if scope == "viewport_2d":
@@ -488,6 +521,9 @@ func update_status() -> void:
 
 
 func attach_current_annotation() -> void:
+	if not ctx.permission_enabled("allow_screenshots"):
+		invalidate_sensitive_capture()
+		return
 	if canvas == null or canvas.source_image == null:
 		ctx.append_status("Eye Attach has no captured image.")
 		return
@@ -506,6 +542,9 @@ func attach_current_annotation() -> void:
 
 
 func write_annotation_artifact() -> Dictionary:
+	if not ctx.permission_enabled("allow_screenshots"):
+		invalidate_sensitive_capture()
+		return _screenshot_permission_error()
 	ctx.ensure_dirs()
 	var annotation_id := ctx.identifier("annotation_" + ctx.file_time() + "_" + str(Time.get_ticks_msec()), "annotation")
 	var annotation_dir_abs := ctx.annotations_dir_abs.path_join(annotation_id)

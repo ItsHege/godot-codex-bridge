@@ -101,6 +101,25 @@ func _run() -> void:
 	_assert_eq(send_plan_params.get("thread_id"), "thread-2", "send plan thread id")
 	_assert_eq((send_plan_params.get("annotation", {}) as Dictionary).get("annotation_id"), "ann-2", "send plan annotation")
 
+	var revoked_screenshot_plan := ChatActionModel.chat_send_plan(
+		"do not attach pixels",
+		"thread-2",
+		true,
+		false,
+		true,
+		true,
+		{"annotation_id": "ann-sensitive"},
+		"",
+		"",
+		false
+	)
+	var revoked_attachments := revoked_screenshot_plan.get("attachments", {}) as Dictionary
+	var revoked_params := revoked_screenshot_plan.get("params", {}) as Dictionary
+	_assert_false(bool(revoked_attachments.get("latest_screenshot", true)), "revoked permission strips stale screenshot attachment")
+	_assert_false(bool(revoked_attachments.get("latest_annotation", true)), "revoked permission strips stale annotation attachment")
+	_assert_false(revoked_params.has("annotation"), "revoked permission strips annotation payload")
+	_assert_false(bool(revoked_screenshot_plan.get("capture_screenshot", true)), "revoked permission suppresses screenshot capture")
+
 	var send_effect_plan := ChatActionModel.chat_send_effect_plan(send_plan, " build it ")
 	var send_effects := send_effect_plan.get("effects", []) as Array
 	_assert_eq(send_effects.size(), 8, "send effect count")

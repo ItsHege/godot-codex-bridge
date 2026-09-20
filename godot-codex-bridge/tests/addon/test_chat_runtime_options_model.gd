@@ -33,11 +33,38 @@ func _run() -> void:
 	])
 	_assert_eq(efforts.size(), 2, "normalize efforts keeps dicts and strings")
 	_assert_eq(efforts[1].get("reasoningEffort"), "high", "normalize string effort")
+	var extended_efforts := ChatRuntimeOptionsModel.normalize_reasoning_efforts([
+		{"reasoningEffort": "max", "description": "Maximum supported effort."},
+		"ultra",
+		"future-safe",
+		"future_safe",
+		"future-safe",
+		"unsafe effort",
+		"unsafe/slash",
+		123,
+	])
+	_assert_eq(extended_efforts.size(), 4, "normalize efforts keeps bounded safe future values")
+	_assert_eq(extended_efforts[0].get("reasoningEffort"), "max", "normalize efforts keeps max")
+	_assert_eq(extended_efforts[1].get("reasoningEffort"), "ultra", "normalize efforts keeps ultra")
+	_assert_eq(extended_efforts[2].get("reasoningEffort"), "future-safe", "normalize efforts keeps future hyphen value")
+	_assert_eq(extended_efforts[3].get("reasoningEffort"), "future_safe", "normalize efforts keeps future underscore value")
+	_assert_true(ChatRuntimeOptionsModel.is_safe_reasoning_effort("ultra"), "ultra is a safe effort id")
+	_assert_false(ChatRuntimeOptionsModel.is_safe_reasoning_effort("unsafe effort"), "spaces are rejected in effort ids")
+	_assert_false(ChatRuntimeOptionsModel.is_safe_reasoning_effort("x".repeat(ChatRuntimeOptionsModel.MAX_REASONING_EFFORT_ID_LENGTH + 1)), "oversized effort id rejected")
+	var many_efforts: Array = []
+	for index in range(ChatRuntimeOptionsModel.MAX_REASONING_EFFORTS + 5):
+		many_efforts.append("future_" + str(index))
+	_assert_eq(ChatRuntimeOptionsModel.normalize_reasoning_efforts(many_efforts).size(), ChatRuntimeOptionsModel.MAX_REASONING_EFFORTS, "reported effort inventory is bounded")
 
 	var fallback := ChatRuntimeOptionsModel.reasoning_efforts_or_default([])
 	_assert_true(fallback.size() >= 5, "default reasoning efforts present")
 	_assert_eq(ChatRuntimeOptionsModel.reasoning_effort_label("minimal"), "Fast", "minimal label")
 	_assert_eq(ChatRuntimeOptionsModel.reasoning_effort_label("xhigh"), "XHigh", "xhigh label")
+	_assert_eq(ChatRuntimeOptionsModel.reasoning_effort_label("max"), "Max", "max label")
+	_assert_eq(ChatRuntimeOptionsModel.reasoning_effort_label("ultra"), "Ultra", "ultra label")
+	_assert_eq(ChatRuntimeOptionsModel.reasoning_effort_label("future_safe"), "Future Safe", "future effort label")
+	_assert_true(ChatRuntimeOptionsModel.reasoning_effort_label("future_" + "deep_".repeat(12)).length() <= ChatRuntimeOptionsModel.MAX_REASONING_EFFORT_LABEL_LENGTH, "future effort label is bounded")
+	_assert_eq(ChatRuntimeOptionsModel.reasoning_efforts_or_default(["unsafe effort"]).size(), fallback.size(), "invalid effort inventory uses bounded fallback")
 
 	var request_ready := ChatRuntimeOptionsModel.request_models_effect_plan(true)
 	var request_effects := request_ready.get("effects", []) as Array
@@ -150,6 +177,21 @@ func _run() -> void:
 	_assert_eq(int((runtime_selection_effects[1] as Dictionary).get("index", -1)), 2, "runtime selection reasoning index")
 	_assert_eq(str((runtime_selection_effects[1] as Dictionary).get("effort", "")), "high", "runtime selection effort retained")
 
+	var extended_runtime_selection := ChatRuntimeOptionsModel.runtime_selection_effect_plan(
+		{"effort": "ultra"},
+		[],
+		[
+			{"reasoningEffort": ""},
+			{"reasoningEffort": "max"},
+			{"reasoningEffort": "ultra"},
+			{"reasoningEffort": "future-safe"},
+		]
+	)
+	var extended_runtime_effects := extended_runtime_selection.get("effects", []) as Array
+	_assert_eq(extended_runtime_effects.size(), 1, "extended runtime selection emits reasoning effect")
+	_assert_eq(int((extended_runtime_effects[0] as Dictionary).get("index", -1)), 2, "extended runtime selection finds ultra")
+	_assert_eq(str((extended_runtime_effects[0] as Dictionary).get("effort", "")), "ultra", "extended runtime selection round-trips ultra")
+
 	var runtime_unknown := ChatRuntimeOptionsModel.runtime_selection_effect_plan(
 		{"model": "missing", "effort": ""},
 		[{"model": "gpt-5.4"}],
@@ -162,6 +204,15 @@ func _run() -> void:
 	_assert_eq(effort_rows.size(), 3, "reasoning rows include default plus efforts")
 	_assert_eq(int(reasoning_rows.get("select_index", -1)), 2, "reasoning rows preserve selected effort")
 	_assert_eq(str((effort_rows[1] as Dictionary).get("label", "")), "Low", "reasoning rows label effort")
+
+	var extended_reasoning_rows := ChatRuntimeOptionsModel.reasoning_option_rows(extended_efforts, "future-safe")
+	var extended_rows := extended_reasoning_rows.get("rows", []) as Array
+	_assert_eq(extended_rows.size(), 5, "reasoning rows include all safe reported efforts")
+	_assert_eq(int(extended_reasoning_rows.get("select_index", -1)), 3, "reasoning rows select future reported effort")
+	_assert_eq(str((extended_rows[1] as Dictionary).get("label", "")), "Max", "reasoning rows render max")
+	_assert_eq(str((extended_rows[2] as Dictionary).get("label", "")), "Ultra", "reasoning rows render ultra")
+	_assert_eq(str((extended_rows[3] as Dictionary).get("label", "")), "Future Safe", "reasoning rows render future effort")
+	_assert_eq(ChatRuntimeOptionsModel.selected_reasoning_from_metadata((extended_rows[3] as Dictionary).get("metadata", {})), "future-safe", "future effort metadata round-trips")
 
 	_assert_eq(ChatRuntimeOptionsModel.selected_model_from_metadata({"model": "gpt-5.5"}), "gpt-5.5", "selected model metadata")
 	_assert_eq(ChatRuntimeOptionsModel.selected_reasoning_from_metadata({"reasoningEffort": "high"}), "high", "selected reasoning metadata")

@@ -675,8 +675,10 @@ the source project files and does not restore anything automatically.
 
 ### godot.create_visual_baseline
 
-Copies a local PNG screenshot into the bridge visual-regression baseline
-artifacts. Baselines stay local under `.godot\godot_codex_bridge`.
+Temporarily disabled. The MCP server cannot yet verify both the live screenshot
+permission and project-confined provenance of the supplied PNG. Calls fail
+closed with `trusted_screenshot_permission_unavailable`; this is a mitigation,
+not a completed approval design.
 
 ### godot.compare_visual_regression
 
@@ -737,10 +739,11 @@ save-and-check path when parse evidence is required.
 
 ### godot.apply_approved_diff
 
-Applies reviewed text content to a safe project-relative path. It requires the
-approval token `APPROVE_GODOT_CODEX_BRIDGE_APPLY`, supports an optional
-`expectedCurrentSha256` drift check, and creates an undo snapshot for existing
-files before writing.
+Temporarily disabled. Every call fails closed with
+`trusted_approval_unavailable`; caller-supplied approval tokens are not accepted.
+Use `godot.preview_scene_diff` for review and a trusted user-controlled workflow
+for application until Host/UI-issued, short-lived, single-use, fully bound
+approval receipts are implemented.
 
 ### godot.fix_selected_node
 

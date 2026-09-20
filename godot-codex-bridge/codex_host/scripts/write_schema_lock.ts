@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { resolveCodexCommand } from "../src/codexCommand.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,7 @@ const lockedFiles = [
   "schemas/json/codex_app_server_protocol.v2.schemas.json"
 ];
 
+const codex = await codexVersion();
 const lock = {
   schema_lock_version: 1,
   generated_at: new Date().toISOString(),
@@ -22,7 +24,7 @@ const lock = {
     "codex app-server generate-ts --out ./schemas",
     "codex app-server generate-json-schema --out ./schemas/json"
   ],
-  codex_cli_version: await codexVersion(),
+  codex_cli_version: codex.version,
   files: Object.fromEntries(await Promise.all(lockedFiles.map(async (relativePath) => {
     const absolutePath = path.join(packageRoot, relativePath);
     const bytes = await fs.readFile(absolutePath);
@@ -35,15 +37,8 @@ const lock = {
 
 await fs.writeFile(path.join(packageRoot, "schemas", "SCHEMA_LOCK.json"), `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
-async function codexVersion(): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("codex", ["--version"], { windowsHide: true });
-    return stdout.trim();
-  } catch (error) {
-    if (process.platform !== "win32") {
-      throw error;
-    }
-    const { stdout } = await execFileAsync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "codex --version"], { windowsHide: true });
-    return stdout.trim();
-  }
+async function codexVersion(): Promise<{ version: string }> {
+  const command = resolveCodexCommand(process.env.GODOT_CODEX_HOST_CODEX_BIN ?? "codex", ["--version"]);
+  const { stdout } = await execFileAsync(command.file, command.args, { windowsHide: true, timeout: 10_000 });
+  return { version: stdout.trim() };
 }

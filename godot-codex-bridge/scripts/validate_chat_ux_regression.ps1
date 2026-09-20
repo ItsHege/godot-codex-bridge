@@ -25,6 +25,15 @@ function Add-Step([string] $Name, [string] $Status, [hashtable] $Details = @{}) 
   }) | Out-Null
 }
 
+function Assert-NativeStepSucceeded([string] $Name) {
+  $exitCode = $global:LASTEXITCODE
+  if ($null -eq $exitCode -or $exitCode -ne 0) {
+    Add-Step $Name "failed" @{ exit_code = $exitCode }
+    $exitLabel = if ($null -eq $exitCode) { "missing" } else { [string]$exitCode }
+    throw "$Name failed with native exit code $exitLabel."
+  }
+}
+
 function Assert-True([bool] $Condition, [string] $Message) {
   if (-not $Condition) {
     throw $Message
@@ -55,9 +64,9 @@ function Assert-StableComposer($Visible, [string] $Prefix) {
   Assert-True ([bool]$Visible.$logInsideField) "Codex Chat $label log is not inside the chat panel."
   Assert-True ([bool]$Visible.$composerBelowField) "Codex Chat $label composer is not below the transcript."
   Assert-True ([bool]$Visible.$approvalAboveField) "Codex Chat $label approval card is not above the input."
-  Assert-True ((Get-Number $Visible.$inputRectField.height) -ge 240) "Codex Chat $label input height regressed below 240 px."
-  Assert-True ((Get-Number $Visible.$minimumSizeField.y) -ge 260) "Codex Chat $label input minimum height regressed below 260 px."
-  Assert-True ((Get-Number $Visible.$rowMinimumSizeField.y) -ge 294) "Codex Chat $label composer row minimum height regressed below 294 px."
+  Assert-True ((Get-Number $Visible.$inputRectField.height) -ge 80) "Codex Chat $label input height regressed below 80 px."
+  Assert-True ((Get-Number $Visible.$minimumSizeField.y) -ge 88) "Codex Chat $label input minimum height regressed below 88 px."
+  Assert-True ((Get-Number $Visible.$rowMinimumSizeField.y) -ge 122) "Codex Chat $label composer row minimum height regressed below 122 px."
   Assert-True (-not [bool]$Visible.$scrollFitField) "Codex Chat $label input scroll_fit_content_height must stay false."
 }
 
@@ -73,17 +82,24 @@ New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
 
 Push-Location $productRoot
 try {
+  $global:LASTEXITCODE = $null
   & powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\install_addon.ps1" -ProjectRoot $ProjectRoot -Apply -Replace -HostRuntime mock -HostPort $Port | Out-Host
+  Assert-NativeStepSucceeded "install_mock_addon"
   Add-Step "install_mock_addon" "ok" @{ port = $Port }
 
+  $global:LASTEXITCODE = $null
   & npm run validate:addon-core | Out-Host
+  Assert-NativeStepSucceeded "addon_core"
   Add-Step "addon_core" "ok" @{}
 
   # validate:addon-core reinstalls the fixture with app-server defaults. Restore
   # mock host config before starting the visible editor smoke.
+  $global:LASTEXITCODE = $null
   & powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\install_addon.ps1" -ProjectRoot $ProjectRoot -Apply -Replace -HostRuntime mock -HostPort $Port | Out-Host
+  Assert-NativeStepSucceeded "restore_mock_host_config"
   Add-Step "restore_mock_host_config" "ok" @{ port = $Port }
 
+  $global:LASTEXITCODE = $null
   & powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\validate_visible_chat_editor.ps1" `
     -ProjectRoot $ProjectRoot `
     -Runtime mock `
@@ -92,6 +108,7 @@ try {
     -StartupTimeoutSeconds $StartupTimeoutSeconds `
     -RequestTimeoutSeconds $RequestTimeoutSeconds `
     -TurnTimeoutSeconds $TurnTimeoutSeconds | Out-Host
+  Assert-NativeStepSucceeded "visible_chat_editor"
   Add-Step "visible_chat_editor" "ok" @{ report_path = $visibleReportPath }
 
   if (-not (Test-Path -LiteralPath $visibleReportPath)) {
@@ -107,8 +124,8 @@ try {
   Assert-True ([int]$visible.chat_multiline_line_count -ge 2) "Shift+Enter line count stayed below 2."
   Assert-True ([bool]$visible.chat_multiline_handled_event) "Shift+Enter InputEventKey was not handled by Codex Chat input."
   Assert-True ([bool]$visible.chat_multiline_expanded_after_shift_enter) "Shift+Enter did not switch the Codex Chat composer to expanded mode."
-  Assert-True ([double]$visible.chat_multiline_auto_input_minimum_size.y -ge 260) "Shift+Enter did not auto-grow the Codex Chat input."
-  Assert-True ([double]$visible.chat_multiline_auto_input_row_minimum_size.y -ge 294) "Shift+Enter did not auto-grow the Codex Chat input row."
+  Assert-True ([double]$visible.chat_multiline_auto_input_minimum_size.y -ge 220) "Shift+Enter did not auto-grow the Codex Chat input."
+  Assert-True ([double]$visible.chat_multiline_auto_input_row_minimum_size.y -ge 254) "Shift+Enter did not auto-grow the Codex Chat input row."
   Assert-True (-not [bool]$visible.chat_multiline_input_scroll_fit_content_height) "Multiline validation reports scroll_fit_content_height=true."
   Assert-True ($visible.chat_enter_send_validation_status -eq "succeeded") "Codex Chat Enter-to-send validation did not succeed."
   Assert-True ([bool]$visible.chat_enter_send_handled_event) "Enter InputEventKey was not handled by Codex Chat input."
@@ -117,17 +134,17 @@ try {
   Assert-True ([bool]$visible.chat_enter_send_turn_completed) "Enter-to-send did not complete a Codex turn."
   Assert-True ($visible.chat_wrapped_prompt_validation_status -eq "succeeded") "Codex Chat wrapped prompt validation did not succeed."
   Assert-True ([bool]$visible.chat_wrapped_prompt_expanded_after_text) "Wrapped prompt did not switch the Codex Chat composer to expanded mode."
-  Assert-True ([double]$visible.chat_wrapped_prompt_auto_input_minimum_size.y -ge 260) "Wrapped prompt did not auto-grow the Codex Chat input."
-  Assert-True ([double]$visible.chat_wrapped_prompt_auto_input_row_minimum_size.y -ge 294) "Wrapped prompt did not auto-grow the Codex Chat input row."
+  Assert-True ([double]$visible.chat_wrapped_prompt_auto_input_minimum_size.y -ge 220) "Wrapped prompt did not auto-grow the Codex Chat input."
+  Assert-True ([double]$visible.chat_wrapped_prompt_auto_input_row_minimum_size.y -ge 254) "Wrapped prompt did not auto-grow the Codex Chat input row."
   Assert-True ($visible.chat_long_prompt_validation_status -eq "succeeded") "Codex Chat long prompt validation did not succeed."
   Assert-True ([bool]$visible.chat_long_prompt_expanded_after_text) "Long prompt did not switch the Codex Chat composer to expanded mode."
-  Assert-True ([double]$visible.chat_long_prompt_auto_input_minimum_size.y -ge 360) "Long prompt did not auto-grow the Codex Chat input."
-  Assert-True ([double]$visible.chat_long_prompt_auto_input_row_minimum_size.y -ge 454) "Long prompt did not auto-grow the Codex Chat input row."
+  Assert-True ([double]$visible.chat_long_prompt_auto_input_minimum_size.y -ge 220) "Long prompt did not auto-grow the Codex Chat input."
+  Assert-True ([double]$visible.chat_long_prompt_auto_input_row_minimum_size.y -ge 254) "Long prompt did not auto-grow the Codex Chat input row."
   Assert-True (-not [bool]$visible.chat_long_prompt_input_scroll_fit_content_height) "Long prompt validation reports scroll_fit_content_height=true."
   Assert-True ($visible.composer_open_status -eq "succeeded") "Composer expand request did not succeed."
-  Assert-True ([double]$visible.composer_open_input_minimum_size.y -ge 420) "Composer expand did not raise the input min height."
+  Assert-True ([double]$visible.composer_open_input_minimum_size.y -ge 220) "Composer expand did not raise the input min height."
   Assert-True ($visible.composer_close_status -eq "succeeded") "Composer collapse request did not succeed."
-  Assert-True ([double]$visible.composer_close_input_minimum_size.y -eq 260) "Composer collapse did not restore the comfortable input min height."
+  Assert-True ([double]$visible.composer_close_input_minimum_size.y -eq 88) "Composer collapse did not restore the compact input min height."
   Assert-StableComposer $visible "final"
   Assert-True (-not [bool]$visible.advanced_visible) "Advanced controls are visible by default."
   Assert-True ([bool]$visible.advanced_toggle_visible) "Advanced toggle is not visible."
@@ -178,7 +195,7 @@ try {
   Assert-True ([bool]$visible.diff_overflow_log_inside_panel) "Diff overflow moved the transcript outside the panel."
   Assert-True ([bool]$visible.diff_overflow_composer_below_log) "Diff overflow changed the composer/log ordering."
   Assert-True ([bool]$visible.diff_overflow_approval_above_input) "Diff overflow changed the approval/composer ordering."
-  Assert-True ([double]$visible.diff_overflow_input_rect.height -ge 240) "Diff overflow shrank the chat composer below the stable visible height."
+  Assert-True ([double]$visible.diff_overflow_input_rect.height -ge 80) "Diff overflow shrank the chat composer below the stable visible height."
   Assert-True ($visible.diff_overflow_visual_status -eq "succeeded") "Diff overflow visual evidence capture did not succeed."
   Assert-True (-not [string]::IsNullOrWhiteSpace([string]$visible.diff_overflow_visual_path)) "Diff overflow visual evidence path is missing."
   Assert-True (Test-Path -LiteralPath ([string]$visible.diff_overflow_visual_path)) "Diff overflow visual evidence PNG does not exist."

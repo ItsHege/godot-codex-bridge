@@ -18,7 +18,7 @@ func _init() -> void:
 
 func _run() -> void:
 	var ctx := BridgeContext.new()
-	ctx.permissions = {"allow_ai_markers": true}
+	ctx.permissions = {"allow_ai_markers": true, "allow_screenshots": true}
 	var controller := AnnotationController.new(ctx)
 	_assert_true(controller != null, "annotation controller instantiates")
 	_assert_false(controller.has_pending(), "annotation controller starts without pending marker")
@@ -47,6 +47,20 @@ func _run() -> void:
 	_assert_false(pending_label.visible, "pending label hidden after clear")
 	_assert_false(clear_button.visible, "clear button hidden after clear")
 	_assert_eq(pending_label.text, "", "pending label clears text")
+
+	ctx.permissions["allow_screenshots"] = false
+	var denied_capture := controller.capture_annotation_source("editor_window")
+	_assert_false(bool(denied_capture.get("ok", true)), "shared annotation capture rejects disabled screenshot permission")
+	_assert_eq((denied_capture.get("error", {}) as Dictionary).get("code"), "permission_denied", "annotation capture permission code")
+	var denied_window := controller.capture_editor_window_image()
+	_assert_eq((denied_window.get("error", {}) as Dictionary).get("code"), "permission_denied", "editor window capture permission code")
+	var denied_root := controller.call("_capture_editor_root_viewport_image") as Dictionary
+	_assert_eq((denied_root.get("error", {}) as Dictionary).get("code"), "permission_denied", "editor root capture permission code")
+	var denied_viewport := controller.capture_editor_viewport_image("viewport_3d")
+	_assert_eq((denied_viewport.get("error", {}) as Dictionary).get("code"), "permission_denied", "editor viewport capture permission code")
+	controller.pending_annotation = {"annotation_id": "sensitive"}
+	controller.invalidate_sensitive_capture("")
+	_assert_false(controller.has_pending(), "permission revocation clears pending annotation")
 	pending_label.free()
 	clear_button.free()
 

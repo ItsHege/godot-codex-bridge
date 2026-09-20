@@ -102,11 +102,11 @@ Default editing flow starts with diff preview:
 proposal -> diff preview -> user review
 ```
 
-Approved write tools extend that flow with:
+Future approved write tools must extend that flow with:
 
 ```text
-undo/snapshot plan -> explicit approval token -> apply -> validation
+undo/snapshot plan -> bound human approval receipt -> apply once -> validation
 ```
 
-`godot.apply_approved_diff` is narrow and approval-gated. Broad automatic scene
-mutation remains out of scope.
+`godot.apply_approved_diff` currently fails closed until that trusted receipt
+flow exists. Broad automatic scene mutation remains out of scope.

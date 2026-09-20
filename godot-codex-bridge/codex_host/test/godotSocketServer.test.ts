@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import WebSocket from "ws";
+import { request as httpRequest } from "node:http";
 import { loadConfig } from "../src/config.js";
 import { MockCodexRuntime } from "../src/codexRuntime.js";
 import { GodotSocketServer } from "../src/godotSocketServer.js";
@@ -105,6 +106,87 @@ test("Godot socket server relays bridge RPC requests to the connected addon", as
     assert.equal(result.response.status, "completed");
   } finally {
     addon.socket.close();
+    await server.stop();
+  }
+});
+
+test("native IPC rejects browser and DNS-rebinding requests before RPC dispatch", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const server = new GodotSocketServer("127.0.0.1", 0, controller);
+  await server.start();
+  const port = server.addressPort();
+  try {
+    assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+    for (const headers of [
+      { origin: "https://attacker.example" },
+      { origin: "null" },
+      { host: `attacker.example:${port}` },
+      { "sec-fetch-site": "cross-site" }
+    ]) {
+      for (const endpoint of ["/health", "/bridge/request"]) {
+        const status = await new Promise<number>((resolve, reject) => {
+          const req = httpRequest({ host: "127.0.0.1", port, path: endpoint,
+            method: endpoint === "/health" ? "GET" : "POST", headers }, (res) => {
+            res.resume();
+            resolve(res.statusCode!);
+          });
+          req.on("error", reject);
+          req.end();
+        });
+        assert.equal(status, 403);
+      }
+      await assert.rejects(new Promise<void>((resolve, reject) => {
+        const socket = new WebSocket(`ws://127.0.0.1:${port}`, { headers });
+        socket.once("open", () => { socket.terminate(); resolve(); });
+        socket.once("error", reject);
+      }), /401/);
+    }
+    assert.equal(controller.status().activeProject, undefined);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("host refuses network binds even when constructed outside loadConfig", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  for (const bind of ["0.0.0.0", "::", "192.168.1.10", "attacker.example"]) {
+    await assert.rejects(new GodotSocketServer(bind, 0, controller).start(), /loopback/);
+  }
+});
+
+test("host config rejects nonloopback binds before launching app-server", () => {
+  const previous = process.env.GODOT_CODEX_HOST_BIND;
+  try {
+    for (const bind of ["0.0.0.0", "::", "localhost", "192.168.1.10"]) {
+      process.env.GODOT_CODEX_HOST_BIND = bind;
+      assert.throws(() => loadConfig([]), /GODOT_CODEX_HOST_BIND/);
+    }
+    for (const bind of ["127.0.0.1", "::1"]) {
+      process.env.GODOT_CODEX_HOST_BIND = bind;
+      assert.equal(loadConfig([]).host, bind);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.GODOT_CODEX_HOST_BIND;
+    else process.env.GODOT_CODEX_HOST_BIND = previous;
+  }
+});
+
+test("oversized WebSocket frames close the client and leave the host healthy", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const server = new GodotSocketServer("127.0.0.1", 0, controller);
+  await server.start();
+  const port = server.addressPort();
+  const client = await openWebSocket(`ws://127.0.0.1:${port}`);
+  try {
+    const closed = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("oversized client not closed")), 2000);
+      client.socket.once("close", () => { clearTimeout(timer); resolve(); });
+    });
+    client.socket.send("x".repeat(1024 * 1024 + 1));
+    await closed;
+    assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+  } finally {
+    client.socket.terminate();
     await server.stop();
   }
 });

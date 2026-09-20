@@ -1,5 +1,9 @@
 extends RefCounted
 
+const MAX_REASONING_EFFORTS := 32
+const MAX_REASONING_EFFORT_ID_LENGTH := 64
+const MAX_REASONING_EFFORT_LABEL_LENGTH := 32
+
 const DEFAULT_REASONING_EFFORTS: Array[Dictionary] = [
 	{"reasoningEffort": "minimal", "description": "Fastest lightweight reasoning."},
 	{"reasoningEffort": "low", "description": "Fast iteration."},
@@ -27,14 +31,37 @@ static func normalize_reasoning_efforts(value: Variant) -> Array[Dictionary]:
 	var efforts: Array[Dictionary] = []
 	if typeof(value) != TYPE_ARRAY:
 		return efforts
+	var seen := {}
 	for item in value:
+		if efforts.size() >= MAX_REASONING_EFFORTS:
+			break
+		var effort := ""
+		var effort_dict := {}
 		if typeof(item) == TYPE_DICTIONARY:
-			var effort_dict := (item as Dictionary).duplicate(true)
-			if str(effort_dict.get("reasoningEffort", "")).strip_edges() != "":
-				efforts.append(effort_dict)
-		elif str(item).strip_edges() != "":
-			efforts.append({"reasoningEffort": str(item).strip_edges()})
+			effort_dict = (item as Dictionary).duplicate(true)
+			effort = str(effort_dict.get("reasoningEffort", "")).strip_edges()
+		elif typeof(item) == TYPE_STRING:
+			effort = str(item).strip_edges()
+			effort_dict = {"reasoningEffort": effort}
+		if not is_safe_reasoning_effort(effort) or seen.has(effort):
+			continue
+		effort_dict["reasoningEffort"] = effort
+		seen[effort] = true
+		efforts.append(effort_dict)
 	return efforts
+
+
+static func is_safe_reasoning_effort(effort: String) -> bool:
+	var normalized := effort.strip_edges()
+	if normalized == "" or normalized.length() > MAX_REASONING_EFFORT_ID_LENGTH:
+		return false
+	for index in range(normalized.length()):
+		var code := normalized.unicode_at(index)
+		var is_ascii_letter := (code >= 65 and code <= 90) or (code >= 97 and code <= 122)
+		var is_digit := code >= 48 and code <= 57
+		if not is_ascii_letter and not is_digit and code != 45 and code != 95:
+			return false
+	return true
 
 
 static func reasoning_efforts_or_default(value: Variant) -> Array[Dictionary]:
@@ -258,18 +285,23 @@ static func selected_index_for_reasoning_metadata(metadata_items: Array, effort:
 
 
 static func reasoning_effort_label(effort: String) -> String:
-	match effort.strip_edges():
+	var normalized := effort.strip_edges()
+	var label := ""
+	match normalized:
 		"none":
-			return "None"
+			label = "None"
 		"minimal":
-			return "Fast"
+			label = "Fast"
 		"low":
-			return "Low"
+			label = "Low"
 		"medium":
-			return "Medium"
+			label = "Medium"
 		"high":
-			return "High"
+			label = "High"
 		"xhigh":
-			return "XHigh"
+			label = "XHigh"
 		_:
-			return effort.strip_edges().capitalize()
+			label = normalized.replace("_", " ").replace("-", " ").capitalize()
+	if label.length() > MAX_REASONING_EFFORT_LABEL_LENGTH:
+		return label.substr(0, MAX_REASONING_EFFORT_LABEL_LENGTH - 3) + "..."
+	return label

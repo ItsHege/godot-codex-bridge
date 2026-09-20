@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+	"gc-work": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gc_work.ps1",
     "package:addon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_addon.ps1",
     "install:addon": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_addon.ps1",
     "stage:blender-import": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage_blender_import.ps1",
