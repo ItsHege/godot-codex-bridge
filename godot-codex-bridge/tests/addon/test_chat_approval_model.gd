@@ -132,7 +132,39 @@ func _run() -> void:
 
 	var empty_plan := ChatApprovalModel.response_plan({}, "approve", "", true)
 	_assert_false(bool(empty_plan.get("ok", false)), "empty approval response plan is not ok")
-	_assert_eq(str(empty_plan.get("action", "")), "ignore", "empty approval response plan ignores")
+	_assert_eq(str(empty_plan.get("action", "")), "status", "empty approval response plan reports status")
+	_assert_true(str(empty_plan.get("system_message", "")).find("no longer active") >= 0, "empty approval response explains stale click")
+	var empty_effects := ChatApprovalModel.response_effect_plan({}, "approve", "", true).get("effects", []) as Array
+	_assert_eq(empty_effects.size(), 1, "stale approval click has one local effect")
+	_assert_eq((empty_effects[0] as Dictionary).get("action"), "system_message", "stale approval click stays local")
+	_assert_false(_has_action(empty_effects, "send_json"), "stale approval click sends no response")
+
+	var resolution_active := command.duplicate(true)
+	resolution_active["runtime_approval_id"] = "runtime-command"
+	resolution_active["turn_id"] = "turn-command"
+	_assert_true(ChatApprovalModel.resolution_matches(resolution_active, {
+		"approval_id": "approval-command",
+		"runtime_approval_id": "runtime-other",
+	}), "host approval id is the primary resolution identity")
+	_assert_false(ChatApprovalModel.resolution_matches(resolution_active, {
+		"approval_id": "approval-other",
+		"runtime_approval_id": "runtime-command",
+	}), "mismatched primary id cannot fall back to runtime id")
+	_assert_true(ChatApprovalModel.resolution_matches(resolution_active, {
+		"runtime_approval_id": "runtime-command",
+	}), "runtime approval id is a bounded fallback")
+	_assert_false(ChatApprovalModel.resolution_matches(resolution_active, {
+		"runtime_approval_id": "runtime-other",
+	}), "unknown runtime approval id does not match")
+	_assert_false(ChatApprovalModel.resolution_matches({}, {
+		"approval_id": "approval-command",
+	}), "duplicate resolution does not match cleared approval")
+	_assert_false(ChatApprovalModel.resolution_matches(resolution_active, {}), "resolution without identity does not match")
+	_assert_true(ChatApprovalModel.interrupted_turn_matches(resolution_active, {"turn_id": "turn-command"}), "interrupted turn matches approval turn")
+	_assert_false(ChatApprovalModel.interrupted_turn_matches(resolution_active, {"turn_id": "turn-other"}), "unrelated interrupted turn does not match")
+	_assert_false(ChatApprovalModel.interrupted_turn_matches(resolution_active, {}), "interruption without turn id does not match")
+	_assert_eq(ChatApprovalModel.resolution_message("approval.resolved", {"status": "cancelled"}), "Approval resolved: cancelled", "resolution message uses status fallback")
+	_assert_eq(ChatApprovalModel.resolution_message("approval.expired", {}), "Approval expired; files left unchanged.", "expiry message preserves evidence")
 
 	var disconnected_plan := ChatApprovalModel.response_plan(command, "approve", "", false)
 	_assert_false(bool(disconnected_plan.get("ok", false)), "disconnected approval response plan is not ok")

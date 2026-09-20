@@ -1352,7 +1352,7 @@ function registerTools(server: McpServer, config: ServerConfig): void {
     "godot.create_visual_baseline",
     {
       title: "Create Godot Visual Baseline",
-      description: "Copy a local PNG screenshot into bridge visual regression baselines.",
+      description: "Disabled until the MCP server can verify live screenshot permission and project-confined source provenance.",
       inputSchema: {
         screenshotPath: z.string().min(1),
         baselineName: z.string().max(80).optional(),
@@ -1402,13 +1402,13 @@ function registerTools(server: McpServer, config: ServerConfig): void {
     "godot.apply_approved_diff",
     {
       title: "Apply Approved Godot Diff",
-      description: "Apply reviewed text content to a safe project-relative path after explicit approval token and optional current hash check.",
+      description: "Temporarily disabled: returns a fail-closed error until a trusted human approval receipt flow is available.",
       inputSchema: {
         path: z.string().min(1),
         proposedContent: z.string(),
         allowCreate: z.boolean().optional(),
         expectedCurrentSha256: z.string().optional(),
-        approvalToken: z.string().min(1),
+        approvalToken: z.string().optional(),
         label: z.string().max(80).optional(),
       },
     },

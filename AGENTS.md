@@ -48,6 +48,16 @@ matching visible-editor script from `godot-codex-bridge/`, for example
 Report what you ran and what passed. If a check cannot run (for example, no
 Godot binary), say so explicitly.
 
+Use the smallest useful team: work directly for a small fix; delegate independent
+research, implementation or review when it improves the result. Reuse existing
+agents, assign disjoint write ownership, and respect runtime capacity. Propose
+and implement reversible improvements within the user's task without repeated
+confirmation. Preserve unrelated work and report evidence before publication.
+
+Use Node 22.14+ (24 LTS recommended). CI tests Node 22/24 on Windows/Ubuntu and
+the pinned Godot 4.7.1 addon fixture. App-server schema compatibility, mock
+tests and real authenticated runtime validation are separate evidence.
+
 ## Safety Non-Negotiables
 
 - Tools are read-only by default. Mutations go through Godot `UndoRedo` and
@@ -63,6 +73,11 @@ Godot binary), say so explicitly.
 - Do not add arbitrary command execution or broad file-write tools.
 - Do not commit machine-specific files such as
   `addons/godot_codex_bridge/host_config.json`.
+- Keep Codex Host on numeric loopback; preserve browser Origin/Host rejection
+  and transport payload limits. Local IPC does not authenticate native processes.
+- GitHub connector, native Git and `gh` have separate credentials. Failure of
+  one is not evidence that the others fail. Use an available authorized route;
+  do not alter global authentication as a workaround.
 
 ## Contract Stability
 

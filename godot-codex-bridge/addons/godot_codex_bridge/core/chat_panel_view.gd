@@ -5,9 +5,9 @@ const ChatPromptTextEdit := preload("chat_prompt_text_edit.gd")
 
 const DEFAULT_PANEL_MIN_WIDTH := 220.0
 const DEFAULT_BUTTON_HEIGHT := 26.0
-const INPUT_MIN_HEIGHT := 260.0
-const INPUT_AUTO_HEIGHT := 260.0
-const INPUT_EXPANDED_HEIGHT := 420.0
+const INPUT_MIN_HEIGHT := 88.0
+const INPUT_AUTO_HEIGHT := 88.0
+const INPUT_EXPANDED_HEIGHT := 220.0
 const INPUT_CONTROLS_HEIGHT := 34.0
 const LOG_FRAME_MIN_HEIGHT := 48.0
 
@@ -36,7 +36,8 @@ static func create_panel_controls(status_color: Color) -> Dictionary:
 	panel.add_child(working_label)
 
 	var toolbar_controls := create_toolbar_controls()
-	advanced_panel.add_child(toolbar_controls.get("row") as HBoxContainer)
+	panel.add_child(toolbar_controls.get("row") as HBoxContainer)
+	advanced_panel.add_child(toolbar_controls.get("advanced_row") as HBoxContainer)
 
 	var runtime_controls := create_runtime_controls()
 	advanced_panel.add_child(runtime_controls.get("row") as HBoxContainer)
@@ -67,6 +68,7 @@ static func create_panel_controls(status_color: Color) -> Dictionary:
 	arrange_chat_panel_sections(
 		panel,
 		advanced_panel,
+		toolbar_controls.get("row") as HBoxContainer,
 		annotation_row,
 		log_frame,
 		approval_panel,
@@ -105,6 +107,8 @@ static func control_refs(panel_controls: Dictionary) -> Dictionary:
 		"panel": panel_controls.get("panel"),
 		"status_dot": status_controls.get("status_dot"),
 		"status_label": status_controls.get("status_label"),
+		"build_label": status_controls.get("build_label"),
+		"trust_indicator": status_controls.get("trust_indicator"),
 		"advanced_toggle": status_controls.get("advanced_toggle"),
 		"advanced_panel": panel_controls.get("advanced_panel"),
 		"readiness_label": meta_controls.get("readiness_label"),
@@ -144,6 +148,7 @@ static func control_refs(panel_controls: Dictionary) -> Dictionary:
 		"log_view": log_controls.get("scroll"),
 		"message_list": log_controls.get("message_list"),
 		"bottom_spacer": log_controls.get("bottom_spacer"),
+		"jump_latest_button": log_controls.get("jump_latest_button"),
 	}
 
 
@@ -169,6 +174,20 @@ static func create_status_header_controls(status_color: Color) -> Dictionary:
 	var status_label := create_clip_label()
 	row.add_child(status_label)
 
+	var build_label := Label.new()
+	build_label.text = "Addon: unmanaged"
+	build_label.tooltip_text = "Addon installation provenance is unavailable."
+	build_label.add_theme_font_size_override("font_size", 10)
+	build_label.add_theme_color_override("font_color", Color(0.92, 0.72, 0.34))
+	row.add_child(build_label)
+
+	var trust_indicator := Label.new()
+	trust_indicator.text = "Trust on"
+	trust_indicator.tooltip_text = "Trust Session is active. Permission and approval boundaries still apply."
+	trust_indicator.visible = false
+	trust_indicator.add_theme_color_override("font_color", Color(0.42, 0.86, 0.58))
+	row.add_child(trust_indicator)
+
 	var connect_button := create_button(
 		"Connect",
 		"Connect Codex Host to this Godot project.",
@@ -186,6 +205,8 @@ static func create_status_header_controls(status_color: Color) -> Dictionary:
 		"row": row,
 		"status_dot": dot,
 		"status_label": status_label,
+		"build_label": build_label,
+		"trust_indicator": trust_indicator,
 		"connect_button": connect_button,
 		"advanced_toggle": advanced_toggle,
 	}
@@ -218,9 +239,11 @@ static func create_meta_controls() -> Dictionary:
 static func create_toolbar_controls() -> Dictionary:
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var advanced_row := HBoxContainer.new()
+	advanced_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var cancel_button := create_button(
-		"Cancel",
+		"Stop",
 		"Interrupt the active foreground Codex turn."
 	)
 	cancel_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -233,7 +256,7 @@ static func create_toolbar_controls() -> Dictionary:
 	)
 	emergency_stop_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	emergency_stop_button.clip_text = true
-	row.add_child(emergency_stop_button)
+	advanced_row.add_child(emergency_stop_button)
 
 	var enable_tools_button := create_button(
 		"Enable Tools",
@@ -241,10 +264,11 @@ static func create_toolbar_controls() -> Dictionary:
 	)
 	enable_tools_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	enable_tools_button.clip_text = true
-	row.add_child(enable_tools_button)
+	advanced_row.add_child(enable_tools_button)
 
 	return {
 		"row": row,
+		"advanced_row": advanced_row,
 		"cancel_button": cancel_button,
 		"emergency_stop_button": emergency_stop_button,
 		"enable_tools_button": enable_tools_button,
@@ -576,11 +600,24 @@ static func create_log_controls() -> Dictionary:
 	bottom_spacer.custom_minimum_size = Vector2(0, 8)
 	message_list.add_child(bottom_spacer)
 
+	var jump_latest_button := create_button("Jump to latest", "Resume following the newest conversation update.", 112)
+	jump_latest_button.visible = false
+	jump_latest_button.anchor_left = 1.0
+	jump_latest_button.anchor_top = 1.0
+	jump_latest_button.anchor_right = 1.0
+	jump_latest_button.anchor_bottom = 1.0
+	jump_latest_button.offset_left = -120.0
+	jump_latest_button.offset_top = -34.0
+	jump_latest_button.offset_right = -8.0
+	jump_latest_button.offset_bottom = -8.0
+	frame.add_child(jump_latest_button)
+
 	return {
 		"frame": frame,
 		"scroll": scroll,
 		"message_list": message_list,
 		"bottom_spacer": bottom_spacer,
+		"jump_latest_button": jump_latest_button,
 	}
 
 
@@ -645,12 +682,12 @@ static func create_approval_controls() -> Dictionary:
 	}
 
 
-static func arrange_chat_panel_sections(panel: VBoxContainer, advanced_panel: Control, annotation_row: Control, log_frame: Control, approval_panel: Control, input_row: Control) -> void:
+static func arrange_chat_panel_sections(panel: VBoxContainer, advanced_panel: Control, toolbar_row: Control, annotation_row: Control, log_frame: Control, approval_panel: Control, input_row: Control) -> void:
 	if panel == null:
 		return
 	if approval_panel != null and approval_panel.get_parent() == null:
 		panel.add_child(approval_panel)
-	_move_after_panel_child(panel, annotation_row, advanced_panel)
+	_move_after_panel_child(panel, annotation_row, toolbar_row)
 	_move_after_panel_child(panel, log_frame, annotation_row)
 	_move_after_panel_child(panel, approval_panel, log_frame)
 	_move_after_panel_child(panel, input_row, approval_panel)

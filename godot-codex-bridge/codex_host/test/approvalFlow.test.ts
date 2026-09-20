@@ -74,6 +74,42 @@ class CommandApprovalRuntime implements CodexRuntimeAdapter {
   async shutdown(): Promise<void> {}
 }
 
+class ServerResolvedApprovalRuntime implements CodexRuntimeAdapter {
+  readonly kind = "server-resolved-approval-test";
+  decisions: Array<{ approvalId: string; decision: string }> = [];
+
+  async startThread(options: RuntimeThreadOptions): Promise<RuntimeThreadHandle> {
+    return { threadId: "thread-server-resolved", cwd: options.projectRoot, instructionSources: [] };
+  }
+
+  async *runTurn(input: RuntimeTurnInput): AsyncIterable<HostEvent> {
+    yield event("turn.started", { thread_id: input.threadId, turn_id: "turn-server-resolved" });
+    yield event("approval.requested", {
+      runtime_approval_id: "runtime-server-resolved",
+      kind: "command_execution",
+      thread_id: input.threadId,
+      turn_id: "turn-server-resolved",
+      item_id: "command-server-resolved",
+      command: "echo stale",
+      raw_method: "item/commandExecution/requestApproval",
+      raw_params: {},
+    });
+    yield event("approval.invalidated", {
+      runtime_approval_id: "runtime-server-resolved",
+      thread_id: input.threadId,
+      turn_id: "turn-server-resolved",
+      request_id: 72,
+      reason: "server_resolved",
+    });
+  }
+
+  async interruptTurn(): Promise<void> {}
+  async respondToApproval(approvalId: string, decision: "approve" | "approve_session" | "reject" | "revise" | "expired"): Promise<void> {
+    this.decisions.push({ approvalId, decision });
+  }
+  async shutdown(): Promise<void> {}
+}
+
 test("HostController wraps runtime approval with host nonce and resolves response", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-approval-flow-"));
   await fs.writeFile(path.join(projectRoot, "project.godot"), "[application]\n", "utf8");
@@ -179,6 +215,39 @@ test("HostController forwards session command approval", async () => {
   assert.deepEqual(runtime.decisions, [{ approvalId: "runtime-command-1", decision: "approve_session" }]);
   const resolvedEvent = events.find((hostEvent) => hostEvent.method === "approval.resolved")!;
   assert.equal(resolvedEvent.params.status, "approved_session");
+});
+
+test("HostController invalidates server-resolved approval exactly once and rejects late clicks", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-server-resolved-flow-"));
+  await fs.writeFile(path.join(projectRoot, "project.godot"), "[application]\n", "utf8");
+  const runtime = new ServerResolvedApprovalRuntime();
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), runtime);
+  const events: HostEvent[] = [];
+  controller.on("event", (hostEvent) => events.push(hostEvent));
+
+  await controller.handleRequest({ method: "project.attach", params: { project_root: projectRoot } });
+  await controller.handleRequest({ method: "thread.send", params: { message: "request then resolve" } });
+  await waitFor(() => events.some((hostEvent) => hostEvent.method === "approval.resolved"));
+
+  const requested = events.find((hostEvent) => hostEvent.method === "approval.requested")!;
+  const resolved = events.filter((hostEvent) => hostEvent.method === "approval.resolved");
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0].params.approval_id, requested.params.approval_id);
+  assert.equal(resolved[0].params.runtime_approval_id, "runtime-server-resolved");
+  assert.equal(resolved[0].params.decision, "server_resolved");
+  assert.equal(resolved[0].params.status, "resolved_by_server");
+  assert.equal(controller.status().pendingApprovals, 0);
+  assert.equal(controller.status().state, "turn_running");
+
+  await assert.rejects(controller.handleRequest({
+    method: "approval.respond",
+    params: {
+      approval_id: requested.params.approval_id,
+      nonce: requested.params.nonce,
+      decision: "approve",
+    },
+  }), /approval_not_pending/);
+  assert.deepEqual(runtime.decisions, []);
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

@@ -2,47 +2,78 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
     name: Node ${{ matrix.node-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest ]
-        node-version: [ '20.x', '22.x' ]
-
+        os: [ubuntu-latest, windows-latest]
+        node-version: ['22.x', '24.x']
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
-      - name: Install root and workspace dependencies
-        run: npm ci
-
+          cache: npm
+      - run: npm ci
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+      - run: npm run build
+      - run: npm test
+      - name: Verify chat validation rejects failed child processes
+        if: runner.os == 'Windows' && matrix.node-version == '24.x'
+        shell: pwsh
+        run: ./godot-codex-bridge/scripts/test_chat_ux_native_exit.ps1
+      - name: Validate private-to-public export boundaries (workspace checkout only)
+        if: runner.os == 'Windows' && matrix.node-version == '24.x'
+        shell: pwsh
+        run: |
+          if (Test-Path tools/test_export_public.ps1) {
+            & ./tools/test_export_public.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
-      - name: Compile TypeScript packages (MCP Server & Codex Host)
-        run: npm run build
-
-      - name: Run MCP Server test suite
-        run: npm run test:mcp
-
-      - name: Run Codex Host test suite
-        run: npm run test:host
-
-      # Note on Godot Addon Headless Testing:
-      # Godot addon core tests (64 suites) require a Godot 4.3+ binary and run via
-      # `npm run validate:addon-core` (or `godot-codex-bridge/scripts/validate_addon_core.ps1`).
-      # To prevent fragile CI runners and environment-dependent binary paths, Godot-level
-      # validation is maintained as local developer pre-flight checks rather than unpinned CI jobs.
+  addon-core:
+    name: Godot 4.7.1 addon regression
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the pinned Godot build and verify its SHA-512
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'godot-4.7.1.zip'
+          $runtime = Join-Path $env:RUNNER_TEMP 'godot-4.7.1'
+          Invoke-WebRequest 'https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_win64.exe.zip' -OutFile $archive
+          $expected = 'a6b02c527c18ba9936e63562032701432b2dc57d98d6483ceaccb00fe14af16af5773ae8a55e7b4d614edf121c4d9e420d870f804edb1dac16362298a01ce6c4'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA512).Hash.ToLowerInvariant() -ne $expected) {
+            throw 'Godot archive checksum mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $runtime
+          "GODOT_BIN=$runtime/Godot_v4.7.1-stable_win64_console.exe" >> $env:GITHUB_ENV
+      - name: Import fixture and run addon suites
+        shell: pwsh
+        run: |
+          & $env:GODOT_BIN --headless --editor --path godot-codex-bridge/examples/minimal_3d_project --import
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./godot-codex-bridge/scripts/validate_addon_core.ps1 -GodotExecutable $env:GODOT_BIN
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
-import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import WebSocket from "ws";
@@ -12,6 +11,7 @@ import type { ModelListResponse } from "../schemas/v2/ModelListResponse.js";
 import type { ThreadStartResponse } from "../schemas/v2/ThreadStartResponse.js";
 import type { TurnStartResponse } from "../schemas/v2/TurnStartResponse.js";
 import { AsyncQueue } from "./asyncQueue.js";
+import { resolveCodexCommand } from "./codexCommand.js";
 import { buildBridgeToolsRegistrationPlan } from "./bridgeToolsRegistration.js";
 import type { CodexRuntimeAdapter, RuntimeSandboxMode, RuntimeThreadHandle, RuntimeThreadOptions, RuntimeTurnInput } from "./codexRuntime.js";
 import { event } from "./codexRuntime.js";
@@ -47,26 +47,42 @@ type RuntimeNotification =
   | {
       method: "godot/approvalRequested";
       params: RuntimeApprovalRequest;
+    }
+  | {
+      method: "godot/approvalInvalidated";
+      params: {
+        runtime_approval_id: string;
+        thread_id?: string;
+        turn_id?: string;
+        request_id: JsonRpcId;
+        reason: string;
+      };
     };
 
 type PendingServerRequest = {
+  runtimeApprovalId: string;
+  requestKey: string;
   requestId: JsonRpcId;
   method: string;
   params: unknown;
 };
 
-function normalizeRuntimeReasoningEffort(value: unknown): RuntimeReasoningEffort | undefined {
-  if (
-    value === "none" ||
-    value === "minimal" ||
-    value === "low" ||
-    value === "medium" ||
-    value === "high" ||
-    value === "xhigh"
-  ) {
-    return value;
+export function appServerListenUrl(host: string, port: number): string {
+  return `ws://${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
+const FALLBACK_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const MAX_REASONING_EFFORT_LENGTH = 32;
+const SAFE_REASONING_EFFORT = /^[a-z][a-z0-9_-]*$/;
+
+export function normalizeRuntimeReasoningEffort(value: unknown): RuntimeReasoningEffort | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_REASONING_EFFORT_LENGTH) {
+    return undefined;
   }
-  return undefined;
+  if (value.trim() !== value || !SAFE_REASONING_EFFORT.test(value)) {
+    return undefined;
+  }
+  return value;
 }
 
 export class AppServerRuntime implements CodexRuntimeAdapter {
@@ -78,8 +94,8 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
   private connectionPromise: Promise<void> | null = null;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private readonly pendingServerRequests = new Map<string, PendingServerRequest>();
+  private readonly pendingServerRequestIds = new Map<string, string>();
   private readonly notifications = new AsyncQueue<RuntimeNotification>();
-  private readonly turnDiffs = new Map<string, string>();
   private readonly itemDiffs = new Map<string, unknown>();
   private readonly itemPhases = new Map<string, string>();
   private shuttingDown = false;
@@ -114,18 +130,17 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     const models = (response.data ?? [])
       .filter((model) => !model.hidden)
       .map((model) => {
-        const supportedReasoningEfforts = model.supportedReasoningEfforts
-          .map((option): RuntimeReasoningEffortOption | null => {
-            const reasoningEffort = normalizeRuntimeReasoningEffort(option.reasoningEffort);
-            if (!reasoningEffort) {
-              return null;
-            }
-            return {
-              reasoningEffort,
-              description: option.description
-            };
-          })
-          .filter((option): option is RuntimeReasoningEffortOption => option !== null);
+        const supportedByEffort = new Map<RuntimeReasoningEffort, RuntimeReasoningEffortOption>();
+        for (const option of Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : []) {
+          const reasoningEffort = normalizeRuntimeReasoningEffort(option.reasoningEffort);
+          if (reasoningEffort && !supportedByEffort.has(reasoningEffort)) {
+            supportedByEffort.set(reasoningEffort, { reasoningEffort, description: option.description });
+          }
+        }
+        const defaultReasoningEffort = normalizeRuntimeReasoningEffort(model.defaultReasoningEffort);
+        if (defaultReasoningEffort && !supportedByEffort.has(defaultReasoningEffort)) {
+          supportedByEffort.set(defaultReasoningEffort, { reasoningEffort: defaultReasoningEffort });
+        }
         return {
           id: model.id,
           model: model.model,
@@ -134,8 +149,8 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
           hidden: model.hidden,
           isDefault: model.isDefault,
           inputModalities: Array.isArray(model.inputModalities) ? model.inputModalities : [],
-          defaultReasoningEffort: normalizeRuntimeReasoningEffort(model.defaultReasoningEffort),
-          supportedReasoningEfforts
+          defaultReasoningEffort,
+          supportedReasoningEfforts: [...supportedByEffort.values()]
         };
       });
     const reasoningByEffort = new Map<RuntimeReasoningEffort, RuntimeReasoningEffortOption>();
@@ -145,7 +160,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       }
     }
     if (reasoningByEffort.size === 0) {
-      for (const effort of ["minimal", "low", "medium", "high", "xhigh"] as RuntimeReasoningEffort[]) {
+      for (const effort of FALLBACK_REASONING_EFFORTS) {
         reasoningByEffort.set(effort, { reasoningEffort: effort });
       }
     }
@@ -257,6 +272,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       threadId,
       turnId
     });
+    this.invalidateServerRequests((request) => requestThreadId(request) === threadId && requestTurnId(request) === turnId, "turn_interrupted");
   }
 
   async respondToApproval(approvalId: string, decision: "approve" | "approve_session" | "reject" | "revise" | "expired", note = ""): Promise<void> {
@@ -264,8 +280,13 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     if (!request) {
       throw new Error(`runtime_approval_not_found: ${approvalId}`);
     }
-    this.pendingServerRequests.delete(approvalId);
-    this.sendServerResponse(request.requestId, responseForApproval(request.method, decision, request.params, note));
+    this.removePendingServerRequest(request);
+    try {
+      await this.sendServerResponseAndWait(request.requestId, responseForApproval(request.method, decision, request.params, note));
+    } catch (error) {
+      this.notifications.push(approvalInvalidatedNotification(request, "response_send_failed"));
+      throw error;
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -275,6 +296,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     this.initialized = false;
     this.connectionPromise = null;
     this.failPendingRequests(new Error("app_server_shutdown"));
+    this.invalidateServerRequests(() => true, "runtime_shutdown");
     this.terminateProcess();
     this.notifications.close();
   }
@@ -320,8 +342,8 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       return;
     }
     this.shuttingDown = false;
-    const listen = `ws://${this.options.host}:${this.options.port}`;
-    const command = this.processCommand(listen);
+    const listen = appServerListenUrl(this.options.host, this.options.port);
+    const command = resolveCodexCommand(this.options.codexBin, ["app-server", "--listen", listen]);
     this.proc = spawn(command.file, command.args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true
@@ -343,6 +365,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       this.initialized = false;
       this.socket = null;
       this.failPendingRequests(new Error(`codex app-server exited with code ${code ?? "null"} signal ${signal ?? "null"}`));
+      this.invalidateServerRequests(() => true, "process_exited");
       this.notifications.push({
         method: "warning",
         params: {
@@ -353,57 +376,11 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     });
   }
 
-  private processCommand(listen: string): { file: string; args: string[] } {
-    if (process.platform === "win32" && this.options.codexBin === "codex") {
-      if (!/^ws:\/\/[0-9.]+:\d+$/.test(listen)) {
-        throw new Error(`invalid_app_server_listen_url: ${listen}`);
-      }
-      const nativeCodex = this.findWindowsNativeCodex();
-      if (nativeCodex) {
-        return {
-          file: nativeCodex,
-          args: ["app-server", "--listen", listen]
-        };
-      }
-      return {
-        file: process.env.ComSpec ?? "cmd.exe",
-        args: ["/d", "/s", "/c", `codex app-server --listen ${listen}`]
-      };
-    }
-    return {
-      file: this.options.codexBin,
-      args: ["app-server", "--listen", listen]
-    };
-  }
-
-  private findWindowsNativeCodex(): string | null {
-    const appData = process.env.APPDATA;
-    if (!appData) {
-      return null;
-    }
-    const archDir = process.arch === "arm64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
-    const candidate = path.join(
-      appData,
-      "npm",
-      "node_modules",
-      "@openai",
-      "codex",
-      "node_modules",
-      "@openai",
-      process.arch === "arm64" ? "codex-win32-arm64" : "codex-win32-x64",
-      "vendor",
-      archDir,
-      "bin",
-      "codex.exe"
-    );
-    return existsSync(candidate) ? candidate : null;
-  }
-
   private async connectSocket(): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) {
       return;
     }
-    const url = `ws://${this.options.host}:${this.options.port}`;
+    const url = appServerListenUrl(this.options.host, this.options.port);
     const deadline = Date.now() + 10_000;
     let lastError: Error | null = null;
     while (Date.now() < deadline) {
@@ -415,6 +392,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
           this.initialized = false;
           this.socket = null;
           this.failPendingRequests(new Error("app_server_socket_closed"));
+          this.invalidateServerRequests(() => true, "transport_closed");
           if (!this.shuttingDown) {
             this.terminateProcess();
           }
@@ -423,6 +401,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
           this.initialized = false;
           this.socket = null;
           this.failPendingRequests(error instanceof Error ? error : new Error(String(error)));
+          this.invalidateServerRequests(() => true, "transport_error");
           if (!this.shuttingDown) {
             this.terminateProcess();
           }
@@ -501,6 +480,21 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     }
     if (typeof record.method === "string") {
       const notification = record as ServerNotification;
+      if (notification.method === "serverRequest/resolved") {
+        this.handleServerRequestResolved(notification.params.requestId);
+        return;
+      }
+      if (notification.method === "turn/completed") {
+        this.invalidateServerRequests(
+          (request) => requestThreadId(request) === notification.params.threadId && requestTurnId(request) === notification.params.turn.id,
+          "turn_completed",
+        );
+      } else if (notification.method === "error" && !notification.params.willRetry) {
+        this.invalidateServerRequests(
+          (request) => requestThreadId(request) === notification.params.threadId && requestTurnId(request) === notification.params.turnId,
+          "turn_failed",
+        );
+      }
       this.recordNotificationEvidence(notification);
       this.notifications.push(notification);
     }
@@ -519,14 +513,53 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       return;
     }
 
-    const runtimeApprovalId = `runtime-approval-${String(request.id)}`;
-    this.pendingServerRequests.set(runtimeApprovalId, {
+    const params = request.params as Record<string, unknown>;
+    if (request.method === "item/commandExecution/requestApproval" || request.method === "item/permissions/requestApproval") {
+      const unsupportedScope = params.networkApprovalContext != null
+        ? "managed network access"
+        : params.kind != null && params.kind !== "command"
+          ? "terminal input or an unknown command action"
+          : params.environmentId != null
+            ? "an explicit execution environment"
+            : null;
+      if (unsupportedScope) {
+        this.sendServerResponse(request.id, responseForApproval(request.method, "reject", params));
+        this.notifications.push({
+          method: "warning",
+          params: {
+            threadId: typeof params.threadId === "string" ? params.threadId : null,
+            message: `Approval declined: ${unsupportedScope} cannot yet be faithfully reviewed in Godot chat. Use a Codex client that supports this approval scope.`,
+          },
+        } as ServerNotification);
+        return;
+      }
+    }
+
+    const requestKey = serverRequestKey(request.id);
+    if (this.pendingServerRequestIds.has(requestKey)) {
+      this.sendServerError(request.id, "duplicate_server_request_id", request.method);
+      return;
+    }
+    const runtimeApprovalId = `runtime-approval-${crypto.randomUUID()}`;
+    const pendingRequest: PendingServerRequest = {
+      runtimeApprovalId,
+      requestKey,
       requestId: request.id,
       method: request.method,
       params: request.params
-    });
+    };
+    this.pendingServerRequests.set(runtimeApprovalId, pendingRequest);
+    this.pendingServerRequestIds.set(requestKey, runtimeApprovalId);
 
-    const params = request.params as Record<string, unknown>;
+    const diffEvidence = this.diffEvidenceForRequest(request);
+    if (request.method === "item/fileChange/requestApproval" && Array.isArray(diffEvidence)) {
+      // Refresh the existing diff card immediately before the approval card;
+      // a more recent turn-wide update may otherwise show unrelated changes.
+      this.notifications.push({
+        method: "item/fileChange/patchUpdated",
+        params: { threadId: params.threadId, turnId: params.turnId, itemId: params.itemId, changes: diffEvidence },
+      } as ServerNotification);
+    }
     this.notifications.push({
       method: "godot/approvalRequested",
       params: {
@@ -539,8 +572,8 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
         cwd: params.cwd === undefined || params.cwd === null ? null : String(params.cwd),
         command: params.command as never,
         grant_root: params.grantRoot === undefined || params.grantRoot === null ? null : String(params.grantRoot),
-        diff_evidence: this.diffEvidenceForRequest(request),
-        file_changes: params.fileChanges ?? null,
+        diff_evidence: diffEvidence,
+        file_changes: params.fileChanges ?? (Array.isArray(diffEvidence) ? fileChangesFromFileUpdateChanges(diffEvidence) : null),
         raw_method: request.method,
         raw_params: request.params
       }
@@ -552,6 +585,48 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       throw new Error("app_server_socket_not_open");
     }
     this.socket.send(JSON.stringify({ id, result }));
+  }
+
+  private sendServerResponseAndWait(id: JsonRpcId, result: unknown): Promise<void> {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("app_server_socket_not_open"));
+    }
+    const payload = JSON.stringify({ id, result });
+    return new Promise<void>((resolve, reject) => {
+      socket.send(payload, (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  private handleServerRequestResolved(requestId: JsonRpcId): void {
+    const runtimeApprovalId = this.pendingServerRequestIds.get(serverRequestKey(requestId));
+    const request = runtimeApprovalId ? this.pendingServerRequests.get(runtimeApprovalId) : undefined;
+    if (!request) {
+      return;
+    }
+    this.removePendingServerRequest(request);
+    this.notifications.push(approvalInvalidatedNotification(request, "server_resolved"));
+  }
+
+  private invalidateServerRequests(predicate: (request: PendingServerRequest) => boolean, reason: string): void {
+    for (const request of [...this.pendingServerRequests.values()]) {
+      if (!predicate(request)) {
+        continue;
+      }
+      this.removePendingServerRequest(request);
+      this.notifications.push(approvalInvalidatedNotification(request, reason));
+    }
+  }
+
+  private removePendingServerRequest(request: PendingServerRequest): void {
+    this.pendingServerRequests.delete(request.runtimeApprovalId);
+    this.pendingServerRequestIds.delete(request.requestKey);
   }
 
   private failPendingRequests(error: Error): void {
@@ -588,17 +663,29 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       if (itemType === "agentMessage" && itemId !== "" && phase !== "") {
         this.itemPhases.set(`${threadId}:${turnId}:${itemId}`, phase);
       }
-      return;
-    }
-    if (notification.method === "turn/diff/updated") {
-      this.turnDiffs.set(`${notification.params.threadId}:${notification.params.turnId}`, notification.params.diff);
+      if (notification.method === "item/started" && itemType === "fileChange" && threadId && turnId && itemId) {
+        this.recordItemDiff(`${threadId}:${turnId}:${itemId}`, item?.changes);
+      }
       return;
     }
     if (notification.method === "item/fileChange/patchUpdated") {
-      this.itemDiffs.set(
+      this.recordItemDiff(
         `${notification.params.threadId}:${notification.params.turnId}:${notification.params.itemId}`,
         notification.params.changes
       );
+    }
+  }
+
+  private recordItemDiff(key: string, changes: unknown): void {
+    // Empty or incomplete changes cannot justify a file-write approval.
+    if (Array.isArray(changes) && changes.length > 0 && changes.every((change) => {
+      const entry = objectValue(change);
+      return typeof entry?.path === "string" && entry.path.trim() !== ""
+        && typeof entry.diff === "string" && entry.diff.trim() !== "";
+    })) {
+      this.itemDiffs.set(key, changes);
+    } else {
+      this.itemDiffs.delete(key);
     }
   }
 
@@ -613,9 +700,9 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     const threadId = typeof params.threadId === "string" ? params.threadId : "";
     const turnId = typeof params.turnId === "string" ? params.turnId : "";
     const itemId = typeof params.itemId === "string" ? params.itemId : "";
-    return this.itemDiffs.get(`${threadId}:${turnId}:${itemId}`)
-      ?? this.turnDiffs.get(`${threadId}:${turnId}`)
-      ?? null;
+    // A turn-wide diff can describe a different item; never use it to grant
+    // approval to a request that has no matching item-specific evidence.
+    return threadId && turnId && itemId ? this.itemDiffs.get(`${threadId}:${turnId}:${itemId}`) ?? null : null;
   }
 
   private async readExistingBridgeToolsConfig(serverName: string, cwd: string): Promise<unknown> {
@@ -667,6 +754,33 @@ function objectValue(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function serverRequestKey(id: JsonRpcId): string {
+  return JSON.stringify([typeof id, id]);
+}
+
+function requestThreadId(request: PendingServerRequest): string | undefined {
+  const params = objectValue(request.params);
+  return typeof params?.threadId === "string" ? params.threadId : undefined;
+}
+
+function requestTurnId(request: PendingServerRequest): string | undefined {
+  const params = objectValue(request.params);
+  return typeof params?.turnId === "string" ? params.turnId : undefined;
+}
+
+function approvalInvalidatedNotification(request: PendingServerRequest, reason: string): RuntimeNotification {
+  return {
+    method: "godot/approvalInvalidated",
+    params: {
+      runtime_approval_id: request.runtimeApprovalId,
+      thread_id: requestThreadId(request),
+      turn_id: requestTurnId(request),
+      request_id: request.requestId,
+      reason,
+    },
+  };
+}
+
 function stableJson(value: unknown): string {
   return JSON.stringify(sortJson(value));
 }
@@ -695,6 +809,8 @@ function mapServerNotification(
   switch (notification.method) {
     case "godot/approvalRequested":
       return event("approval.requested", notification.params as unknown as Record<string, unknown>);
+    case "godot/approvalInvalidated":
+      return event("approval.invalidated", notification.params as unknown as Record<string, unknown>);
     case "turn/started":
       return null;
     case "item/agentMessage/delta":
@@ -757,7 +873,9 @@ function mapServerNotification(
       if (notification.params.threadId !== threadId || notification.params.turnId !== turnId) {
         return null;
       }
-      return event("error", {
+      // A retry is progress within the active turn, not a terminal host error.
+      // Keep consuming notifications and keep the controller's busy state.
+      return event(notification.params.willRetry ? "runtime.warning" : "error", {
         thread_id: threadId,
         turn_id: turnId,
         recoverable: notification.params.willRetry,
@@ -907,8 +1025,12 @@ export function appServerTurnStartParams(input: RuntimeTurnInput): Record<string
   if (input.model) {
     params.model = input.model;
   }
-  if (input.effort) {
-    params.effort = input.effort;
+  if (input.effort !== undefined && input.effort !== null) {
+    const effort = normalizeRuntimeReasoningEffort(input.effort);
+    if (!effort) {
+      throw new Error("invalid_reasoning_effort");
+    }
+    params.effort = effort;
   }
   return params;
 }

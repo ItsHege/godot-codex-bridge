@@ -31,9 +31,13 @@ export function loadConfig(argv = process.argv.slice(2)): HostConfig {
   const runtimeArg = readArg(argv, "--runtime");
   const portArg = readArg(argv, "--port");
   const appServerPortArg = readArg(argv, "--app-server-port");
+  const host = process.env.GODOT_CODEX_HOST_BIND ?? "127.0.0.1";
+  if (host !== "127.0.0.1" && host !== "::1") {
+    throw new Error("GODOT_CODEX_HOST_BIND must be 127.0.0.1 or ::1; remote access is unsupported.");
+  }
 
   return {
-    host: process.env.GODOT_CODEX_HOST_BIND ?? "127.0.0.1",
+    host,
     port: portArg ? Number.parseInt(portArg, 10) : readNumber("GODOT_CODEX_HOST_PORT", 49390),
     runtime: parseRuntime(runtimeArg ?? process.env.GODOT_CODEX_HOST_RUNTIME),
     codexBin: process.env.GODOT_CODEX_HOST_CODEX_BIN ?? "codex",

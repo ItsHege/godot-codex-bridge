@@ -44,6 +44,7 @@ export type HostEventMethod =
   | "turn.interrupted"
   | "turn.completed"
   | "approval.requested"
+  | "approval.invalidated"
   | "approval.resolved"
   | "approval.expired"
   | "background.updated"
@@ -98,7 +99,9 @@ export type RuntimeToolInventory = {
   error?: string;
 };
 
-export type RuntimeReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+// App-server model inventory is authoritative for effort identifiers. Keep this
+// open while validating values at the runtime boundary before exposing them.
+export type RuntimeReasoningEffort = string;
 
 export type RuntimeReasoningEffortOption = {
   reasoningEffort: RuntimeReasoningEffort;
@@ -299,7 +302,7 @@ export type RuntimeApprovalRequest = {
 export type HostApproval = RuntimeApprovalRequest & {
   approval_id: string;
   nonce: string;
-  status: "pending" | "approved" | "approved_session" | "rejected" | "revised" | "expired";
+  status: "pending" | "responding" | "expiring" | "approved" | "approved_session" | "rejected" | "revised" | "expired" | "resolved_by_server" | "invalidated";
   created_at: string;
   expires_at: string;
   diff_hash?: string;
@@ -308,6 +311,8 @@ export type HostApproval = RuntimeApprovalRequest & {
   blocked_reason: string | null;
   required_evidence: string[];
   approval_policy_label: string;
+  invalidated_at?: string;
+  invalidation_reason?: string;
 };
 
 export type HostSession = {

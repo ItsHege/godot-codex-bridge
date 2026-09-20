@@ -545,7 +545,8 @@ test("tool handlers expose approved apply and scene generation", async () => {
     proposedContent: "extends Node\nfunc _ready(): pass\n",
   });
   assert.equal(rejectedApply.isError, true);
-  assert.equal(rejectedApply.structuredContent?.status, "invalid_request");
+  assert.equal(rejectedApply.structuredContent?.status, "bridge_unavailable");
+  assert.equal((rejectedApply.structuredContent?.error as { code?: string })?.code, "trusted_approval_unavailable");
 
   const generated = await handlers["godot.generate_scene_from_prompt"]({
     prompt: "small cube room",
@@ -553,6 +554,24 @@ test("tool handlers expose approved apply and scene generation", async () => {
   });
   assert.equal(generated.isError, false);
   assert.equal(generated.structuredContent?.status, "ok");
+});
+
+test("visual baseline creation handler fails closed without trusted permission provenance", async () => {
+  const config = await makeConfig();
+  const handlers = createToolHandlers(config);
+
+  const result = await handlers["godot.create_visual_baseline"]({
+    screenshotPath: path.join(config.projectRoot, "untrusted.png"),
+    baselineName: "main",
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent?.status, "bridge_unavailable");
+  assert.equal(result.structuredContent?.created, false);
+  assert.equal(
+    (result.structuredContent?.error as { code?: string })?.code,
+    "trusted_screenshot_permission_unavailable",
+  );
 });
 
 test("open scene handler validates paths before sending addon requests", async () => {
@@ -723,11 +742,7 @@ test("timeline screenshot handler can compare captured frames to a visual baseli
   await fs.writeFile(frameTwoPath, ONE_BY_ONE_PNG);
 
   const handlers = createToolHandlers(config);
-  const baseline = await handlers["godot.create_visual_baseline"]({
-    screenshotPath: baselinePath,
-    baselineName: "timeline-main",
-  });
-  assert.equal(baseline.isError, false);
+  await installBaseline(config.bridgeDir, "timeline-main", ONE_BY_ONE_PNG);
 
   const requestsDir = path.join(config.bridgeDir, "requests");
   const pending = handlers["godot.capture_timeline_screenshots"]({
@@ -803,11 +818,7 @@ test("multi-view screenshot handler writes editor_control request and can compar
   await fs.writeFile(topPath, ONE_BY_ONE_PNG);
 
   const handlers = createToolHandlers(config);
-  const baseline = await handlers["godot.create_visual_baseline"]({
-    screenshotPath: baselinePath,
-    baselineName: "multi-view-house",
-  });
-  assert.equal(baseline.isError, false);
+  await installBaseline(config.bridgeDir, "multi-view-house", ONE_BY_ONE_PNG);
 
   const pending = handlers["godot.capture_multi_view_screenshots"]({
     nodePath: "City/House",
@@ -2717,6 +2728,12 @@ async function writeLiveHeartbeat(bridgeDir: string): Promise<void> {
     }),
     "utf8",
   );
+}
+
+async function installBaseline(bridgeDir: string, name: string, contents: Buffer): Promise<void> {
+  const baselineRoot = path.join(bridgeDir, "artifacts", "visual_regression", "baselines", name);
+  await fs.mkdir(baselineRoot, { recursive: true });
+  await fs.writeFile(path.join(baselineRoot, "baseline.png"), contents);
 }
 
 function screenshotFixture(index: number, localPath?: string): Record<string, unknown> {

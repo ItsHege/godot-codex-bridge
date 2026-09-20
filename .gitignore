@@ -48,7 +48,12 @@ builds/
 **/addons/godot_codex_bridge/host_config.json
 
 # Local machine/editor settings
+.claude/settings.local.json
+.codex/agents.disabled-*/
 .vscode/
 .idea/
 Thumbs.db
 Desktop.ini
+
+# Local record written by tools/export_public.ps1
+tools/export_staging_record.txt

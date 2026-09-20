@@ -401,13 +401,13 @@ test("thread.send forwards selected model and reasoning effort to runtime", asyn
     params: {
       message: "Use selected runtime options",
       model: "gpt-5-codex",
-      effort: "low"
+      effort: "ultra"
     }
   });
 
   await waitFor(() => events.includes("turn.completed"));
   assert.equal(runtime.turns[0].model, "gpt-5-codex");
-  assert.equal(runtime.turns[0].effort, "low");
+  assert.equal(runtime.turns[0].effort, "ultra");
 });
 
 test("thread.send resolves AI marker annotation and attaches local image when model supports images", async () => {

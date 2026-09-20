@@ -1,6 +1,5 @@
 @tool
 extends RefCounted
-
 const ALLOWED_APPROVAL_DECISIONS := ["approve", "approve_session", "reject", "revise"]
 const CODEX_CHAT_REQUEST_TYPES := [
 	"connect_codex_chat_host",
@@ -8,7 +7,6 @@ const CODEX_CHAT_REQUEST_TYPES := [
 	"send_codex_chat_message",
 	"start_codex_background_team_review",
 	"cancel_codex_background_team_review",
-	"respond_codex_chat_approval",
 ]
 const CODEX_CHAT_EFFECT_ACTIONS := [
 	"connect_host",
@@ -19,8 +17,6 @@ const CODEX_CHAT_EFFECT_ACTIONS := [
 	"send_chat_message",
 	"run_team_review",
 	"cancel_team_review",
-	"set_approval_note",
-	"respond_to_approval",
 ]
 
 
@@ -150,14 +146,6 @@ static func cancel_team_review_request_plan(socket_ready: bool) -> Dictionary:
 	return ok({})
 
 
-static func approval_response_request_plan(has_active_approval: bool, socket_ready: bool, payload: Dictionary) -> Dictionary:
-	if not has_active_approval:
-		return error_result("approval_unavailable", "No active Codex chat approval is visible in the dock.")
-	if not socket_ready:
-		return chat_not_connected("Codex Host is not connected.")
-	return validate_approval_decision(payload)
-
-
 static func request_context(raw_context: Dictionary) -> Dictionary:
 	return {
 		"chat_permission_enabled": bool(raw_context.get("chat_permission_enabled", false)),
@@ -213,14 +201,6 @@ static func request_dispatch_plan(request_type: String, raw_context: Dictionary,
 			plan = cancel_team_review_request_plan(bool(context.get("socket_ready", false)))
 			effect_plan = cancel_team_review_request_effect_plan(plan)
 			success_action = "background.cancel"
-		"respond_codex_chat_approval":
-			plan = approval_response_request_plan(
-				bool(context.get("has_active_approval", false)),
-				bool(context.get("socket_ready", false)),
-				payload
-			)
-			effect_plan = approval_response_request_effect_plan(plan)
-			success_action = "approval.respond"
 		_:
 			plan = error_result("unsupported_chat_request", "Unsupported Codex chat request type: " + request_type)
 			effect_plan = request_failure_effect_plan(plan)
@@ -472,23 +452,5 @@ static func cancel_team_review_request_effect_plan(plan: Dictionary) -> Dictiona
 	return {
 		"effects": [
 			{"action": "cancel_team_review"},
-		],
-	}
-
-
-static func approval_response_request_effect_plan(plan: Dictionary) -> Dictionary:
-	if not bool(plan.get("ok", false)):
-		return request_failure_effect_plan(plan)
-	var data := plan.get("data", {}) as Dictionary
-	return {
-		"effects": [
-			{
-				"action": "set_approval_note",
-				"text": str(data.get("note", "")),
-			},
-			{
-				"action": "respond_to_approval",
-				"decision": str(data.get("decision", "reject")),
-			},
 		],
 	}

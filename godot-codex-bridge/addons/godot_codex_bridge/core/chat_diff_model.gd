@@ -128,27 +128,14 @@ static func batch_summary(update_count: int, parsed_files: Array, file_limit := 
 	var file_count := parsed_files.size()
 	var added := 0
 	var removed := 0
-	var paths := PackedStringArray()
 	for item in parsed_files:
 		if typeof(item) != TYPE_DICTIONARY:
 			continue
 		var file_data := item as Dictionary
 		added += int(file_data.get("added", 0))
 		removed += int(file_data.get("removed", 0))
-		var path := str(file_data.get("path", "")).strip_edges()
-		if path != "" and path != "unknown file":
-			paths.append(path)
-	var lines: Array[String] = []
-	lines.append("Diff preview batch: " + str(max(update_count, 1)) + " update(s), " + str(file_count) + " file(s), +" + str(added) + " -" + str(removed))
-	if paths.is_empty():
-		lines.append("Show files to inspect the colored red/green diff.")
-	else:
-		var visible_paths := paths.slice(0, file_limit)
-		lines.append("Files: " + ", ".join(visible_paths))
-		if paths.size() > file_limit:
-			lines.append("+" + str(paths.size() - file_limit) + " more file(s).")
-		lines.append("Show files, then expand a file row to inspect the colored red/green diff.")
-	return "\n".join(lines)
+	var file_label := "file" if file_count == 1 else "files"
+	return str(file_count) + " " + file_label + " changed · +" + str(added) + " / -" + str(removed)
 
 
 static func batch_toggle_text(files_visible: bool, file_count: int) -> String:

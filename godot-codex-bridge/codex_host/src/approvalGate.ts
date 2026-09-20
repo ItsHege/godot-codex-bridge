@@ -7,6 +7,8 @@ const APPROVAL_TTL_MS = 5 * 60 * 1000;
 
 export class ApprovalGate {
   private readonly approvals = new Map<string, HostApproval>();
+  private readonly approvalIdsByRuntimeId = new Map<string, string>();
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly approvalDir: string,
@@ -33,11 +35,18 @@ export class ApprovalGate {
       ...policy
     };
     this.approvals.set(approval.approval_id, approval);
+    this.approvalIdsByRuntimeId.set(approval.runtime_approval_id, approval.approval_id);
     await this.writeApproval(approval);
     return approval;
   }
 
   async resolve(params: ApprovalRespondParams): Promise<{ approval: HostApproval; runtimeDecision: "approve" | "approve_session" | "reject" | "revise" | "expired" }> {
+    const begun = await this.beginResolve(params);
+    await this.completeResolve(begun.approval.approval_id, begun.runtimeDecision);
+    return begun;
+  }
+
+  async beginResolve(params: ApprovalRespondParams): Promise<{ approval: HostApproval; runtimeDecision: "approve" | "approve_session" | "reject" | "revise" }> {
     const approval = this.approvals.get(params.approval_id);
     if (!approval) {
       throw new Error(`unknown_approval: ${params.approval_id}`);
@@ -49,9 +58,7 @@ export class ApprovalGate {
       throw new Error(`approval_nonce_mismatch: ${params.approval_id}`);
     }
     if (Date.now() > Date.parse(approval.expires_at)) {
-      approval.status = "expired";
-      await this.writeApproval(approval);
-      return { approval, runtimeDecision: "expired" };
+      throw new Error(`approval_expired: ${params.approval_id}`);
     }
 
     if (params.decision === "approve" || params.decision === "approve_session") {
@@ -66,20 +73,59 @@ export class ApprovalGate {
           throw new Error(`approval_diff_hash_mismatch: ${approval.kind}`);
         }
       }
-      approval.status = params.decision === "approve_session" ? "approved_session" : "approved";
+      approval.status = "responding";
       await this.writeApproval(approval);
       return { approval, runtimeDecision: params.decision };
     }
 
     if (params.decision === "revise") {
-      approval.status = "revised";
+      approval.status = "responding";
       await this.writeApproval(approval);
       return { approval, runtimeDecision: "revise" };
     }
 
-    approval.status = "rejected";
+    approval.status = "responding";
     await this.writeApproval(approval);
     return { approval, runtimeDecision: "reject" };
+  }
+
+  async completeResolve(approvalId: string, decision: "approve" | "approve_session" | "reject" | "revise" | "expired"): Promise<HostApproval> {
+    const approval = this.requireApproval(approvalId);
+    const expected = decision === "expired" ? "expiring" : "responding";
+    if (approval.status !== expected) {
+      throw new Error(`approval_not_${expected}: ${approvalId}`);
+    }
+    approval.status = decision === "approve_session" ? "approved_session"
+      : decision === "approve" ? "approved"
+        : decision === "reject" ? "rejected"
+          : decision === "revise" ? "revised" : "expired";
+    this.approvalIdsByRuntimeId.delete(approval.runtime_approval_id);
+    await this.writeApproval(approval);
+    return approval;
+  }
+
+  async abortResolve(approvalId: string): Promise<HostApproval | null> {
+    const approval = this.approvals.get(approvalId);
+    if (!approval || (approval.status !== "responding" && approval.status !== "expiring")) {
+      return null;
+    }
+    approval.status = "pending";
+    await this.writeApproval(approval);
+    return approval;
+  }
+
+  async invalidateByRuntimeId(runtimeApprovalId: string, reason: string, status: "resolved_by_server" | "invalidated" = "resolved_by_server"): Promise<HostApproval | null> {
+    const approvalId = this.approvalIdsByRuntimeId.get(runtimeApprovalId);
+    const approval = approvalId ? this.approvals.get(approvalId) : undefined;
+    if (!approval || (approval.status !== "pending" && approval.status !== "responding" && approval.status !== "expiring")) {
+      return null;
+    }
+    approval.status = status;
+    approval.invalidated_at = new Date().toISOString();
+    approval.invalidation_reason = reason;
+    this.approvalIdsByRuntimeId.delete(runtimeApprovalId);
+    await this.writeApproval(approval);
+    return approval;
   }
 
   pendingCount(): number {
@@ -90,11 +136,11 @@ export class ApprovalGate {
     return [...this.approvals.values()].filter((approval) => approval.status === "pending");
   }
 
-  async expireDue(now = Date.now()): Promise<HostApproval[]> {
+  async beginExpireDue(now = Date.now()): Promise<HostApproval[]> {
     const expired: HostApproval[] = [];
     for (const approval of this.approvals.values()) {
       if (approval.status === "pending" && now > Date.parse(approval.expires_at)) {
-        approval.status = "expired";
+        approval.status = "expiring";
         expired.push(approval);
         await this.writeApproval(approval);
       }
@@ -102,10 +148,31 @@ export class ApprovalGate {
     return expired;
   }
 
+  async expireDue(now = Date.now()): Promise<HostApproval[]> {
+    const expired = await this.beginExpireDue(now);
+    for (const approval of expired) {
+      await this.completeResolve(approval.approval_id, "expired");
+    }
+    return expired;
+  }
+
+  private requireApproval(approvalId: string): HostApproval {
+    const approval = this.approvals.get(approvalId);
+    if (!approval) {
+      throw new Error(`unknown_approval: ${approvalId}`);
+    }
+    return approval;
+  }
+
   private async writeApproval(approval: HostApproval): Promise<void> {
-    await this.init();
     const filePath = path.join(this.approvalDir, `${safeFileName(approval.approval_id)}.json`);
-    await fs.writeFile(filePath, `${JSON.stringify(approval, null, 2)}\n`, "utf8");
+    const snapshot = `${JSON.stringify(approval, null, 2)}\n`;
+    const write = this.writeChain.then(async () => {
+      await this.init();
+      await fs.writeFile(filePath, snapshot, "utf8");
+    });
+    this.writeChain = write.catch(() => undefined);
+    await write;
   }
 }
 

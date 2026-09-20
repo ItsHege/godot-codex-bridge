@@ -418,7 +418,7 @@ try {
   if ($result.layout_status -ne "succeeded" -or -not $result.chat_input_visible -or -not $result.chat_input_inside_panel -or -not $result.chat_log_inside_panel -or -not $result.chat_composer_below_log) {
     throw "Codex Chat input or transcript viewport is not visible inside the chat panel, or the composer is not below the transcript."
   }
-  if ([double]$result.chat_input_rect.height -lt 240 -or [double]$result.chat_input_minimum_size.y -lt 260 -or $result.chat_input_scroll_fit_content_height) {
+  if ([double]$result.chat_input_rect.height -lt 80 -or [double]$result.chat_input_minimum_size.y -lt 88 -or $result.chat_input_scroll_fit_content_height) {
     throw "Codex Chat composer is not a stable multiline input. Height=$($result.chat_input_rect.height), minHeight=$($result.chat_input_minimum_size.y), scrollFit=$($result.chat_input_scroll_fit_content_height)."
   }
   if ($result.chat_composer_expanded -or -not $result.chat_composer_toggle_visible -or -not $result.chat_composer_toggle_inside_panel -or [string]$result.chat_composer_toggle_text -ne "Expand") {
@@ -604,7 +604,7 @@ try {
     -not [bool]$result.diff_overflow_log_inside_panel -or
     -not [bool]$result.diff_overflow_composer_below_log -or
     -not [bool]$result.diff_overflow_approval_above_input -or
-    [double]$result.diff_overflow_input_rect.height -lt 240
+    [double]$result.diff_overflow_input_rect.height -lt 80
   ) {
     throw "Codex Chat diff overflow layout regressed; composer/log/approval are not in the expected panel order."
   }
@@ -679,7 +679,7 @@ try {
   if ($result.chat_multiline_validation_status -ne "succeeded" -or -not $result.chat_multiline_handled_event -or -not $result.chat_multiline_has_newline -or [int]$result.chat_multiline_line_count -lt 2) {
     throw "Codex Chat Shift+Enter multiline validation failed. Status=$($result.chat_multiline_validation_status), handledEvent=$($result.chat_multiline_handled_event), hasNewline=$($result.chat_multiline_has_newline), lineCount=$($result.chat_multiline_line_count)."
   }
-  if ([double]$result.chat_multiline_auto_input_minimum_size.y -lt 260 -or [double]$result.chat_multiline_auto_input_row_minimum_size.y -lt 294) {
+  if ([double]$result.chat_multiline_auto_input_minimum_size.y -lt 200 -or [double]$result.chat_multiline_auto_input_row_minimum_size.y -lt 234) {
     throw "Codex Chat multiline auto-grow failed. InputMin=$($result.chat_multiline_auto_input_minimum_size.y), RowMin=$($result.chat_multiline_auto_input_row_minimum_size.y)."
   }
   if (-not [bool]$result.chat_multiline_expanded_after_shift_enter) {
@@ -702,7 +702,7 @@ try {
   if ($result.chat_wrapped_prompt_validation_status -ne "succeeded") {
     throw "Codex Chat wrapped prompt validation failed. Status=$($result.chat_wrapped_prompt_validation_status)."
   }
-  if ([double]$result.chat_wrapped_prompt_auto_input_minimum_size.y -lt 260 -or [double]$result.chat_wrapped_prompt_auto_input_row_minimum_size.y -lt 294) {
+  if ([double]$result.chat_wrapped_prompt_auto_input_minimum_size.y -lt 200 -or [double]$result.chat_wrapped_prompt_auto_input_row_minimum_size.y -lt 234) {
     throw "Codex Chat wrapped prompt auto-grow failed. InputMin=$($result.chat_wrapped_prompt_auto_input_minimum_size.y), RowMin=$($result.chat_wrapped_prompt_auto_input_row_minimum_size.y)."
   }
   if (-not [bool]$result.chat_wrapped_prompt_expanded_after_text) {
@@ -726,7 +726,7 @@ try {
   if ($result.chat_long_prompt_validation_status -ne "succeeded") {
     throw "Codex Chat long prompt validation failed. Status=$($result.chat_long_prompt_validation_status)."
   }
-  if ([double]$result.chat_long_prompt_auto_input_minimum_size.y -lt 360 -or [double]$result.chat_long_prompt_auto_input_row_minimum_size.y -lt 394) {
+  if ([double]$result.chat_long_prompt_auto_input_minimum_size.y -lt 220 -or [double]$result.chat_long_prompt_auto_input_row_minimum_size.y -lt 254) {
     throw "Codex Chat long prompt auto-grow failed. InputMin=$($result.chat_long_prompt_auto_input_minimum_size.y), RowMin=$($result.chat_long_prompt_auto_input_row_minimum_size.y)."
   }
   if ([bool]$result.chat_long_prompt_input_scroll_fit_content_height) {
@@ -745,7 +745,7 @@ try {
     $composerOpen.response -eq $null -or
     $composerOpen.response.status -ne "succeeded" -or
     -not [bool]$composerOpen.response.data.composer_expanded -or
-    [double]$composerOpen.response.data.input_minimum_size.y -lt 420 -or
+    [double]$composerOpen.response.data.input_minimum_size.y -lt 220 -or
     [string]$composerOpen.response.data.composer_toggle_text -ne "Collapse"
   ) {
     throw "Codex Chat composer did not expand cleanly."
@@ -759,7 +759,7 @@ try {
     $composerOpenLayout.response -eq $null -or
     $composerOpenLayout.response.status -ne "succeeded" -or
     -not [bool]$composerOpenLayout.response.data.composer_expanded -or
-    [double]$composerOpenLayout.response.data.input_rect.height -lt 360
+    [double]$composerOpenLayout.response.data.input_rect.height -lt 180
   ) {
     throw "Codex Chat composer minimum expanded, but the visible input height did not grow."
   }
@@ -774,7 +774,7 @@ try {
     $composerClose.response -eq $null -or
     $composerClose.response.status -ne "succeeded" -or
     [bool]$composerClose.response.data.composer_expanded -or
-    [double]$composerClose.response.data.input_minimum_size.y -ne 260 -or
+    [double]$composerClose.response.data.input_minimum_size.y -ne 88 -or
     [string]$composerClose.response.data.composer_toggle_text -ne "Expand"
   ) {
     throw "Codex Chat composer did not collapse cleanly."
@@ -787,8 +787,8 @@ try {
     $composerCloseLayout.response -eq $null -or
     $composerCloseLayout.response.status -ne "succeeded" -or
     [bool]$composerCloseLayout.response.data.composer_expanded -or
-    [double]$composerCloseLayout.response.data.input_rect.height -lt 240 -or
-    [double]$composerCloseLayout.response.data.input_rect.height -gt 280
+    [double]$composerCloseLayout.response.data.input_rect.height -lt 80 -or
+    [double]$composerCloseLayout.response.data.input_rect.height -gt 120
   ) {
     throw "Codex Chat composer did not visibly return to the compact height."
   }
@@ -1133,7 +1133,7 @@ try {
   ) {
     throw "Codex Chat layout is not contained after chat messages are rendered, or the composer/approval stack is ordered incorrectly."
   }
-  if ([double]$result.final_chat_input_rect.height -lt 240 -or [double]$result.final_chat_input_minimum_size.y -lt 260 -or [double]$result.final_chat_input_row_minimum_size.y -lt 294 -or $result.final_chat_input_scroll_fit_content_height) {
+  if ([double]$result.final_chat_input_rect.height -lt 80 -or [double]$result.final_chat_input_minimum_size.y -lt 88 -or [double]$result.final_chat_input_row_minimum_size.y -lt 122 -or $result.final_chat_input_scroll_fit_content_height) {
     throw "Codex Chat composer regressed after messages rendered. Height=$($result.final_chat_input_rect.height), minHeight=$($result.final_chat_input_minimum_size.y), scrollFit=$($result.final_chat_input_scroll_fit_content_height)."
   }
   if ($result.final_chat_composer_expanded -or -not $result.final_chat_composer_toggle_visible -or [string]$result.final_chat_composer_toggle_text -ne "Expand") {

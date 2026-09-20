@@ -33,7 +33,7 @@ func _run() -> void:
 	_assert_true(ChatRequestModel.is_codex_chat_request_type("send_codex_chat_message"), "send request type known")
 	_assert_true(ChatRequestModel.is_codex_chat_request_type("start_codex_background_team_review"), "team request type known")
 	_assert_true(ChatRequestModel.is_codex_chat_request_type("cancel_codex_background_team_review"), "cancel team request type known")
-	_assert_true(ChatRequestModel.is_codex_chat_request_type("respond_codex_chat_approval"), "approval request type known")
+	_assert_false(ChatRequestModel.is_codex_chat_request_type("respond_codex_chat_approval"), "approval response is not exposed through production requests")
 	_assert_false(ChatRequestModel.is_codex_chat_request_type("get_codex_chat_layout_status"), "layout request type not chat")
 	_assert_false(ChatRequestModel.is_codex_chat_request_type("unsupported_request"), "unsupported request type not chat")
 
@@ -97,12 +97,6 @@ func _run() -> void:
 
 	_assert_true(bool(ChatRequestModel.cancel_team_review_request_plan(true).get("ok", false)), "cancel team allowed")
 	_assert_eq((ChatRequestModel.cancel_team_review_request_plan(false).get("error", {}) as Dictionary).get("code"), "chat_host_not_connected", "cancel team socket")
-
-	var approval_plan := ChatRequestModel.approval_response_request_plan(true, true, {"decision": "revise", "note": "change"})
-	_assert_true(bool(approval_plan.get("ok", false)), "approval response allowed")
-	_assert_eq((approval_plan.get("data", {}) as Dictionary).get("decision"), "revise", "approval response decision")
-	_assert_eq((ChatRequestModel.approval_response_request_plan(false, true, {}).get("error", {}) as Dictionary).get("code"), "approval_unavailable", "approval unavailable")
-	_assert_eq((ChatRequestModel.approval_response_request_plan(true, false, {}).get("error", {}) as Dictionary).get("code"), "chat_host_not_connected", "approval socket")
 
 	var invalid_addon_rpc := ChatRequestModel.addon_rpc_request_plan({
 		"request_id": "outer-1",
@@ -213,15 +207,6 @@ func _run() -> void:
 		{}
 	)
 	_assert_eq(((enable_dispatch_offline.get("plan", {}) as Dictionary).get("error", {}) as Dictionary).get("code"), "chat_host_not_connected", "enable dispatch disconnected")
-
-	var approval_dispatch := ChatRequestModel.request_dispatch_plan(
-		"respond_codex_chat_approval",
-		request_context,
-		{"decision": "approve_session", "note": "go"}
-	)
-	_assert_eq(approval_dispatch.get("success_action"), "approval.respond", "approval dispatch success action")
-	_assert_eq(_effect_action((approval_dispatch.get("effect_plan", {}) as Dictionary).get("effects", []) as Array, 1), "respond_to_approval", "approval dispatch response effect")
-	_assert_eq((((approval_dispatch.get("effect_plan", {}) as Dictionary).get("effects", []) as Array)[1] as Dictionary).get("decision"), "approve_session", "approval dispatch decision")
 
 	var team_dispatch_denied := ChatRequestModel.request_dispatch_plan(
 		"start_codex_background_team_review",
@@ -347,13 +332,6 @@ func _run() -> void:
 	_assert_eq(cancel_team_effects.size(), 1, "cancel team request effect count")
 	_assert_eq(_effect_action(cancel_team_effects, 0), "cancel_team_review", "cancel team request effect")
 
-	var approval_effects := (ChatRequestModel.approval_response_request_effect_plan(approval_plan).get("effects", []) as Array)
-	_assert_eq(approval_effects.size(), 2, "approval request effect count")
-	_assert_eq(_effect_action(approval_effects, 0), "set_approval_note", "approval request note effect")
-	_assert_eq((approval_effects[0] as Dictionary).get("text"), "change", "approval request note text")
-	_assert_eq(_effect_action(approval_effects, 1), "respond_to_approval", "approval request response effect")
-	_assert_eq((approval_effects[1] as Dictionary).get("decision"), "revise", "approval request decision")
-
 	var app_effects := ChatRequestModel.request_application_effects([
 		"bad",
 		{"action": "unknown_action", "text": "ignored"},
@@ -363,14 +341,12 @@ func _run() -> void:
 		{"action": "respond_to_approval"},
 		{"action": "connect_host", "extra": "ignored"},
 	])
-	_assert_eq(app_effects.size(), 5, "application effects filter invalid and unknown")
+	_assert_eq(app_effects.size(), 3, "application effects filter invalid and approval-only actions")
 	_assert_eq((app_effects[0] as Dictionary).get("action"), "set_runtime_options", "application runtime action")
 	_assert_eq(((app_effects[0] as Dictionary).get("value", {}) as Dictionary).size(), 0, "application runtime value normalized")
 	_assert_eq((app_effects[1] as Dictionary).get("text"), "123", "application chat input text normalized")
 	_assert_true(bool((app_effects[1] as Dictionary).get("refresh_composer", false)), "application chat input refresh normalized")
-	_assert_eq((app_effects[2] as Dictionary).get("text"), "456", "application approval note text normalized")
-	_assert_eq((app_effects[3] as Dictionary).get("decision"), "reject", "application approval decision default")
-	_assert_eq((app_effects[4] as Dictionary).get("action"), "connect_host", "application simple action preserved")
+	_assert_eq((app_effects[2] as Dictionary).get("action"), "connect_host", "application simple action preserved")
 
 
 func _effect_action(effects: Array, index: int) -> String:

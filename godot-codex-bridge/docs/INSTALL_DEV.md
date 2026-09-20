@@ -1,6 +1,6 @@
 # Install And Development Usage
 
-This guide is for local MVP development of Godot Codex Bridge.
+This guide is for local development of Godot Codex Bridge.
 
 ## Requirements
 
@@ -11,7 +11,7 @@ This guide is for local MVP development of Godot Codex Bridge.
 GODOT_BIN (or godot / godot4 on PATH)
 ```
 
-- Node.js and npm for the MCP server.
+- Node.js 22.14+ and npm for the MCP server and Codex Host; Node 24 LTS recommended.
 - A Godot project that contains the addon at:
 
 ```text
@@ -22,6 +22,33 @@ Compatibility note: treat Godot 4.7.1 as the release gate. Godot 4.7.x should be
 compatible for normal addon use, but a release package is not considered ready
 until the validation commands below pass on the exact Godot build used by the
 target project.
+
+## Codex Compatibility
+
+The host uses Codex app-server. Its checked-in generated schema lock was
+regenerated from Codex CLI 0.151.0. Targeted protocol and mock regressions cover
+that runtime; authenticated runtime compatibility remains unvalidated.
+This does not imply full compatibility with the latest Codex release. Run the
+host doctor, compare version-specific schemas and validate approval/stream
+behavior before upgrading the supported CLI baseline. Mock tests cannot prove
+a real authenticated conversation. WebSocket app-server transport is experimental.
+
+On Windows, the shell's npm `codex.ps1` and a desktop-provided `codex.exe` can
+be different versions. Host and doctor share a resolver that prefers npm's
+native binary for the default `codex` command, falling back to the normal shim.
+Explicit overrides must be native executables; custom Windows .cmd/.bat wrappers
+are rejected instead of being interpolated into shell commands.
+Check the executable/version printed by host doctor; select
+`GODOT_CODEX_HOST_CODEX_BIN` explicitly when validating a version, and generate
+schemas with the same binary. Never treat shell `codex --version` alone as proof
+of which runtime the Bridge launches.
+
+The current addon UI cannot faithfully review managed network, terminal-input
+or explicit-environment approvals, so the host denies those requests with a
+visible explanation. Ordinary local command/file approvals retain their gates.
+Server-resolved approval invalidation uses exact request identity, and reasoning
+options are populated from a bounded runtime-reported inventory with a legacy
+fallback.
 
 ## Local Privacy Model
 
@@ -304,8 +331,9 @@ npm test
   state, and local log path.
 - `godot.preview_scene_diff` returns a unified diff and leaves target files
   unchanged.
-- `godot.apply_approved_diff` applies only with approval token, safe path
-  validation, optional SHA drift check and undo evidence.
+- `godot.apply_approved_diff` fails closed with `trusted_approval_unavailable`
+  until a Host/UI-issued, short-lived, single-use, fully bound approval receipt
+  flow is implemented.
 - `godot.generate_scene_from_prompt` returns a live-editor action plan with
   concrete `suggested_tool_calls`; it does not generate `.tscn` content, return
   a diff preview or apply files, and vague prompts do not invent default scene

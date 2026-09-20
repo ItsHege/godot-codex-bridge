@@ -33,7 +33,9 @@ Godot Codex Bridge connects Codex to an active Godot 4 Editor session through a 
 - **Live Scene Introspection:** inspect active scene metadata, node hierarchies, selection, project files, autoloads, input maps, and diagnostics.
 - **Visual Evidence & Multi-View Capture:** capture viewport screenshots and Front / Side / Top / Perspective proxy renders for a target Node3D.
 - **UndoRedo-Backed Live Edits:** supported editor mutations are routed through Godot-native undo actions rather than raw scene-file rewriting.
-- **Safe Diff Preview Workflow:** preview unified text diffs before applying approval-gated changes.
+- **Safe Diff Preview Workflow:** preview unified text diffs with
+  `godot.preview_scene_diff`. Direct MCP application currently fails closed
+  until trusted, exact-bound approval receipts are implemented.
 - **In-Editor Codex Chat:** run Codex from a native Godot dock with thread, model, context, screenshot, and session controls.
 - **Eye Attach:** draw visual reference markers over the editor and attach them to the next Codex turn.
 - **Explicit Save Boundary:** supported live experimentation remains separate from persistent scene saves until an explicit save action is requested.
@@ -279,8 +281,8 @@ The addon installer generates a machine-specific `addons/godot_codex_bridge/host
 - **Maturity:** Developer Preview / MVP.
 - **Automated validation currently includes:**
   - 127 MCP server tests
-  - 46 Codex Host tests
-  - 64 GDScript addon test scripts (requires Godot)
+  - 75 Codex Host tests
+  - 66 GDScript addon test scripts (requires Godot)
 - **Engine validation:** Godot 4.7.1.
 
 ---

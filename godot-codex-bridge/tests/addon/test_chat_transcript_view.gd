@@ -66,7 +66,7 @@ func _run() -> void:
 	detached_copy_button.free()
 	_assert_eq(view.message_count(), 1, "message count increments after append")
 	_assert_true(bool(body.get_meta("chat_collapsed", false)), "long text starts collapsed")
-	_assert_true(body.text.find("[collapsed") >= 0, "collapsed body includes hint")
+	_assert_true(str(body.get_meta("chat_full_text", "")).contains("Fourth line"), "collapsed body retains complete content")
 
 	var counts := view.control_counts()
 	_assert_eq(int(counts.get("copy_button_count", -1)), 1, "copy button counted")
@@ -78,17 +78,24 @@ func _run() -> void:
 
 	view.toggle_message_collapse(body)
 	_assert_true(not bool(body.get_meta("chat_collapsed", true)), "toggle expands message")
-	_assert_eq(body.text, str(body.get_meta("chat_full_text", "")), "expanded body shows full text")
+	_assert_eq(str(body.get_meta("chat_full_text", "")), long_text, "expanded body retains full text")
 	counts = view.control_counts()
 	_assert_eq(int(counts.get("collapsed_message_count", -1)), 0, "expanded message is not counted as collapsed")
 
 	view.set_bubble_text(body, "short")
 	_assert_true(not bool(body.get_meta("chat_collapsed", true)), "short text is not collapsed")
 	_assert_eq(body.text, "short", "short text displays directly")
+	view.set_bubble_text(body, "**Svarbu**\n- punktas\n`res://kelias/[x].gd`\n```gdscript\nprint(\"labas\")\n```")
+	var rendered_bbcode := str(body.get_meta("chat_rendered_bbcode", ""))
+	_assert_true(rendered_bbcode.contains("[b]Svarbu[/b]"), "safe renderer supports bold")
+	_assert_true(rendered_bbcode.contains("• punktas"), "safe renderer supports lists")
+	_assert_true(rendered_bbcode.contains("[lb]x[rb]"), "untrusted brackets are escaped")
+	_assert_false(rendered_bbcode.contains("[url"), "safe renderer does not create executable links")
 
 	var empty_counts := ChatTranscriptView.empty_control_counts()
 	_assert_eq(int(empty_counts.get("work_batch_count", -1)), 0, "empty counts include work batch key")
 	_assert_eq(int(empty_counts.get("diff_preview_count", -1)), 0, "empty counts include diff key")
+	_assert_eq(int(empty_counts.get("diagnostics_count", -1)), 0, "empty counts include diagnostics key")
 
 	var user_start_count := view.message_count()
 	var user_body := view.append_user_message("hello from user")
@@ -110,14 +117,21 @@ func _run() -> void:
 	var late_status := view.append_status_message("bridge ready", 5000)
 	_assert_true(late_status != status_body, "late repeated status starts a new bubble")
 	_assert_eq(view.message_count(), status_start_count + 2, "late repeated status appends")
-	view.append_status_message("Refreshing Godot Bridge tools for this project...", 7000)
-	view.append_status_message("Bridge tools enabled. Evidence: C:/bridge-tools/evidence.json", 9000)
+	var diagnostics_body := view.append_status_message("Refreshing Godot Bridge tools for this project...", 7000)
+	var diagnostics_updated := view.append_status_message("Bridge tools enabled. Evidence: C:/bridge-tools/evidence.json", 9000)
+	_assert_true(diagnostics_updated == diagnostics_body, "routine diagnostics reuse one compact area")
+	_assert_eq(str(diagnostics_body.get_meta("chat_author", "")), "Diagnostics", "routine status uses diagnostics author")
+	_assert_true(bool(diagnostics_body.get_meta("chat_collapsed", false)), "diagnostics start collapsed")
+	view.toggle_message_collapse(diagnostics_body)
+	view.append_status_message("Connected to Codex.", 10000)
+	_assert_false(bool(diagnostics_body.get_meta("chat_collapsed", true)), "diagnostics expansion survives updates")
 	counts = view.control_counts()
+	_assert_eq(int(counts.get("diagnostics_count", -1)), 1, "routine notifications share one diagnostics area")
 	_assert_eq(int(counts.get("refreshing_tools_status_count", -1)), 1, "refreshing tools status counted")
 	_assert_eq(int(counts.get("bridge_tools_enabled_status_count", -1)), 1, "bridge tools enabled status counted")
 	var blank_status := view.append_status_message("   ")
 	_assert_true(blank_status == null, "blank status message is ignored")
-	_assert_eq(view.message_count(), status_start_count + 4, "blank status does not append")
+	_assert_eq(view.message_count(), status_start_count + 3, "blank status does not append")
 
 	var work_controls := view.append_work_batch(Callable(self, "_on_work_toggle_requested"))
 	var work_panel := work_controls.get("panel", null) as PanelContainer
@@ -128,7 +142,7 @@ func _run() -> void:
 	_assert_true(work_body != null and work_body.has_meta("chat_work_details"), "work details marked")
 	_assert_eq(work_toggle.focus_mode, Control.FOCUS_ALL, "work toggle supports keyboard focus")
 	view.update_work_batch(work_controls, 2, "Checking files.\nRunning validation.", false)
-	_assert_true(work_summary.text.begins_with("Work notes: 2 updates."), "work summary updated")
+	_assert_eq(work_summary.text, "Work notes · 2 updates", "work summary is compact and does not duplicate first note")
 	_assert_eq(work_toggle.text, "Show 2 notes", "work toggle collapsed text")
 	_assert_false(work_body.visible, "work body hidden while collapsed")
 	counts = view.control_counts()
@@ -141,6 +155,16 @@ func _run() -> void:
 	_assert_eq(int(counts.get("work_details_visible_count", -1)), 1, "visible work details counted")
 	work_toggle.pressed.emit()
 	_assert_eq(_work_toggle_requests, 1, "work toggle callback emitted")
+	_assert_false(work_body.visible, "work toggle owns and collapses its own card")
+
+	var newer_work_controls := view.append_work_batch()
+	view.update_work_batch(newer_work_controls, 1, "Newer turn note.", false)
+	var newer_work_body := newer_work_controls.get("body_label", null) as Label
+	work_toggle.pressed.emit()
+	_assert_true(work_body.visible, "older work card can expand independently")
+	_assert_false(newer_work_body.visible, "older work toggle does not affect newer card")
+	view.update_work_batch(newer_work_controls, 2, "Newer turn note.\nStreaming update.", false)
+	_assert_true(work_body.visible, "older work expansion survives newer streaming update")
 
 	var diff_text := "\n".join([
 		"diff --git a/scripts/player.gd b/scripts/player.gd",
@@ -162,7 +186,7 @@ func _run() -> void:
 	_assert_eq(int(diff_result.get("file_count", -1)), 1, "diff file count")
 	_assert_eq(int(diff_result.get("added_count", -1)), 1, "diff added count")
 	_assert_eq(int(diff_result.get("removed_count", -1)), 1, "diff removed count")
-	_assert_true(diff_summary.text.find("2 update(s), 1 file(s), +1 -1") >= 0, "diff summary updated")
+	_assert_eq(diff_summary.text, "1 file changed · +1 / -1", "diff summary is compact")
 	_assert_eq(diff_toggle.text, "Show 1 file", "diff toggle collapsed text")
 	_assert_false(diff_files.visible, "diff files hidden while collapsed")
 	view.set_diff_batch_visible(diff_controls, 1, true)
@@ -174,6 +198,23 @@ func _run() -> void:
 	_assert_eq(int(counts.get("diff_files_box_visible_count", -1)), 1, "diff files box visible counted")
 	diff_toggle.pressed.emit()
 	_assert_eq(_diff_toggle_requests, 1, "diff toggle callback emitted")
+	_assert_false(diff_files.visible, "diff toggle owns and collapses its own card")
+
+	var newer_diff_controls := view.append_diff_batch()
+	view.update_diff_batch(newer_diff_controls, 1, diff_text, false)
+	diff_toggle.pressed.emit()
+	_assert_true(diff_files.visible, "older diff card can expand independently")
+	_assert_false((newer_diff_controls.get("files_box") as VBoxContainer).visible, "older diff toggle does not affect newer card")
+
+	var first_file_section := diff_files.get_child(0) as VBoxContainer
+	var first_file_toggle := first_file_section.get_child(0) as Button
+	var first_file_details := first_file_section.get_child(1) as PanelContainer
+	first_file_toggle.pressed.emit()
+	_assert_true(first_file_details.visible, "per-file diff expands")
+	view.update_diff_batch(diff_controls, 3, diff_text + "\n+streamed", true)
+	first_file_section = diff_files.get_child(0) as VBoxContainer
+	first_file_details = first_file_section.get_child(1) as PanelContainer
+	_assert_true(first_file_details.visible, "per-file diff expansion survives streaming rerender")
 
 	var owned_work_start := view.message_count()
 	var owned_work_state := view.record_work_update("Owned work update.", "owned-work-1")
@@ -210,7 +251,7 @@ func _run() -> void:
 	view.reset_assistant_stream(false)
 	var split_start_count := view.message_count()
 	view.append_assistant_delta("0123456789 0123456789 0123456789", "response-2", "final_answer", 2000)
-	_assert_true(view.message_count() >= split_start_count + 2, "long assistant stream splits into multiple bubbles")
+	_assert_eq(view.message_count(), split_start_count + 1, "one assistant item remains one bubble while streaming")
 	view.reset_assistant_stream(true, 2100)
 	assistant_status = view.assistant_stream_status()
 	_assert_false(bool(assistant_status.get("streaming", true)), "assistant reset clears streaming state")

@@ -14,6 +14,7 @@ import type {
   BackgroundCancelParams,
   BackgroundStartParams,
   HostEvent,
+  HostApproval,
   HostSession,
   HostStatus,
   JsonRpcRequest,
@@ -353,7 +354,12 @@ export class HostController extends EventEmitter {
         }
         const eventToBroadcast = runtimeEvent.method === "approval.requested"
           ? await this.prepareApprovalEvent(runtimeEvent)
-          : runtimeEvent;
+          : runtimeEvent.method === "approval.invalidated"
+            ? await this.prepareApprovalInvalidatedEvent(runtimeEvent)
+            : runtimeEvent;
+        if (!eventToBroadcast) {
+          continue;
+        }
         if (eventToBroadcast.method === "approval.requested") {
           this.setState("waiting_for_approval");
         }
@@ -458,15 +464,37 @@ export class HostController extends EventEmitter {
     if (!this.approvalGate) {
       throw new Error("approval_gate_unavailable");
     }
-    const { approval, runtimeDecision } = await this.approvalGate.resolve(params);
+    const { approval, runtimeDecision } = await this.approvalGate.beginResolve(params);
     let undoSnapshot: UndoSnapshotSummary | undefined;
-    if ((runtimeDecision === "approve" || runtimeDecision === "approve_session") && (approval.kind === "file_change" || approval.kind === "apply_patch")) {
-      this.setState("applying_diff");
+    try {
+      if ((runtimeDecision === "approve" || runtimeDecision === "approve_session") && (approval.kind === "file_change" || approval.kind === "apply_patch")) {
+        this.setState("applying_diff");
+        await this.broadcastStatus();
+        undoSnapshot = await createApprovalUndoSnapshot(this.requireProject(), approval);
+      }
+    } catch (error) {
+      await this.approvalGate.abortResolve(approval.approval_id);
+      this.restoreStateAfterApproval();
       await this.broadcastStatus();
-      undoSnapshot = await createApprovalUndoSnapshot(this.requireProject(), approval);
+      throw error;
     }
-    await this.runtime.respondToApproval(approval.runtime_approval_id, runtimeDecision, params.note ?? "");
-    await this.broadcast(event(runtimeDecision === "expired" ? "approval.expired" : "approval.resolved", {
+    try {
+      await this.runtime.respondToApproval(approval.runtime_approval_id, runtimeDecision, params.note ?? "");
+    } catch (error) {
+      const invalidated = await this.approvalGate.invalidateByRuntimeId(
+        approval.runtime_approval_id,
+        `Runtime no longer accepts this approval: ${(error as Error).message}`,
+        "invalidated",
+      );
+      if (invalidated) {
+        await this.broadcast(this.approvalInvalidatedEvent(invalidated, "runtime_rejected_response"));
+      }
+      this.restoreStateAfterApproval();
+      await this.broadcastStatus();
+      throw new Error(`approval_stale: ${approval.approval_id}`);
+    }
+    await this.approvalGate.completeResolve(approval.approval_id, runtimeDecision);
+    await this.broadcast(event("approval.resolved", {
       approval_id: approval.approval_id,
       runtime_approval_id: approval.runtime_approval_id,
       decision: runtimeDecision,
@@ -475,7 +503,7 @@ export class HostController extends EventEmitter {
       undo_snapshot_file_count: undoSnapshot?.copied_count,
       note: params.note ?? ""
     }));
-    this.setState("ready");
+    this.restoreStateAfterApproval();
     await this.broadcastStatus();
     return {
       accepted: true,
@@ -602,6 +630,45 @@ export class HostController extends EventEmitter {
       raw_params: raw.raw_params ?? raw
     });
     return event("approval.requested", approval as unknown as Record<string, unknown>);
+  }
+
+  private async prepareApprovalInvalidatedEvent(runtimeEvent: HostEvent): Promise<HostEvent | null> {
+    if (!this.approvalGate) {
+      return null;
+    }
+    const runtimeApprovalId = String(runtimeEvent.params.runtime_approval_id ?? "");
+    if (!runtimeApprovalId) {
+      return null;
+    }
+    const reason = String(runtimeEvent.params.reason ?? "server_resolved");
+    const status = reason === "server_resolved" ? "resolved_by_server" : "invalidated";
+    const approval = await this.approvalGate.invalidateByRuntimeId(runtimeApprovalId, reason, status);
+    if (!approval) {
+      return null;
+    }
+    this.restoreStateAfterApproval();
+    return this.approvalInvalidatedEvent(approval, reason);
+  }
+
+  private approvalInvalidatedEvent(approval: HostApproval, reason: string): HostEvent {
+    return event("approval.resolved", {
+      approval_id: approval.approval_id,
+      runtime_approval_id: approval.runtime_approval_id,
+      thread_id: approval.thread_id,
+      turn_id: approval.turn_id,
+      item_id: approval.item_id,
+      decision: reason === "server_resolved" ? "server_resolved" : "invalidated",
+      status: approval.status,
+      reason,
+    });
+  }
+
+  private restoreStateAfterApproval(): void {
+    if ((this.approvalGate?.pendingCount() ?? 0) > 0) {
+      this.setState("waiting_for_approval");
+    } else {
+      this.setState(this.turnId ? "turn_running" : "ready");
+    }
   }
 
   private async resolveAnnotationAttachment(
@@ -737,13 +804,14 @@ export class HostController extends EventEmitter {
     if (!this.approvalGate) {
       return;
     }
-    const expired = await this.approvalGate.expireDue();
+    const expired = await this.approvalGate.beginExpireDue();
     if (expired.length === 0) {
       return;
     }
     for (const approval of expired) {
       try {
         await this.runtime.respondToApproval(approval.runtime_approval_id, "expired");
+        await this.approvalGate.completeResolve(approval.approval_id, "expired");
         await this.broadcast(event("approval.expired", {
           approval_id: approval.approval_id,
           runtime_approval_id: approval.runtime_approval_id,
@@ -751,13 +819,21 @@ export class HostController extends EventEmitter {
           status: approval.status
         }));
       } catch (error) {
+        const invalidated = await this.approvalGate.invalidateByRuntimeId(
+          approval.runtime_approval_id,
+          `Runtime no longer accepts this approval: ${(error as Error).message}`,
+          "invalidated",
+        );
+        if (invalidated) {
+          await this.broadcast(this.approvalInvalidatedEvent(invalidated, "runtime_rejected_expiry"));
+        }
         await this.broadcast(event("runtime.warning", {
           message: `approval_expiry_response_failed: ${(error as Error).message}`,
           approval_id: approval.approval_id
         }));
       }
     }
-    this.setState(this.turnId ? "turn_running" : "ready");
+    this.restoreStateAfterApproval();
     await this.broadcastStatus();
   }
 

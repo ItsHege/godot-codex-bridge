@@ -30,7 +30,7 @@ func _init(context: BridgeContext = null) -> void:
 
 
 func capture_multi_view(params: Dictionary) -> Dictionary:
-	if _context != null and not _context.permission_enabled("allow_screenshots"):
+	if _context == null or not _context.permission_enabled("allow_screenshots"):
 		return _err("permission_denied", "Screenshot capture permission is disabled.")
 	if DisplayServer.get_name().to_lower() == "headless":
 		return _err("multi_view_capture_unavailable", "Multi-view capture requires a visible editor/display; headless display mode cannot render viewport evidence.")
@@ -102,6 +102,8 @@ func capture_multi_view(params: Dictionary) -> Dictionary:
 	if not failures.is_empty():
 		manifest["failures"] = failures
 
+	if _context == null or not _context.permission_enabled("allow_screenshots"):
+		return _err("permission_denied", "Screenshot capture permission was revoked before the multi-view manifest was written.")
 	var manifest_path := artifact_dir.path_join("multi_view.json")
 	var write_result := _write_json(manifest_path, manifest)
 	if not bool(write_result.get("ok", false)):
@@ -112,7 +114,7 @@ func capture_multi_view(params: Dictionary) -> Dictionary:
 
 
 func capture_multi_view_async(params: Dictionary) -> Dictionary:
-	if _context != null and not _context.permission_enabled("allow_screenshots"):
+	if _context == null or not _context.permission_enabled("allow_screenshots"):
 		return _err("permission_denied", "Screenshot capture permission is disabled.")
 	if DisplayServer.get_name().to_lower() == "headless":
 		return _err("multi_view_capture_unavailable", "Multi-view capture requires a visible editor/display; headless display mode cannot render viewport evidence.")
@@ -184,6 +186,8 @@ func capture_multi_view_async(params: Dictionary) -> Dictionary:
 	if not failures.is_empty():
 		manifest["failures"] = failures
 
+	if _context == null or not _context.permission_enabled("allow_screenshots"):
+		return _err("permission_denied", "Screenshot capture permission was revoked before the multi-view manifest was written.")
 	var manifest_path := artifact_dir.path_join("multi_view.json")
 	var write_result := _write_json(manifest_path, manifest)
 	if not bool(write_result.get("ok", false)):
@@ -249,6 +253,8 @@ func _bounds_for_targets(scene_root: Node, targets: Array, max_nodes: int) -> Di
 
 
 func _capture_view(scene_root: Node3D, targets: Array, bounds: AABB, view: String, width: int, height: int, artifact_dir: String, capture_id: String) -> Dictionary:
+	if _context == null or not _context.permission_enabled("allow_screenshots"):
+		return {"view": view, "status": "error", "error": _error_payload("permission_denied", "Screenshot capture permission is disabled.")}
 	var subviewport := SubViewport.new()
 	subviewport.name = "GodotCodexBridgeMultiViewViewport"
 	subviewport.size = Vector2i(width, height)
@@ -299,6 +305,9 @@ func _capture_view(scene_root: Node3D, targets: Array, bounds: AABB, view: Strin
 			"error": _error_payload("multi_view_image_unavailable", "Offscreen multi-view image was empty for view: " + view),
 		}
 	else:
+		if _context == null or not _context.permission_enabled("allow_screenshots"):
+			subviewport.queue_free()
+			return {"view": view, "status": "error", "error": _error_payload("permission_denied", "Screenshot capture permission was revoked before the artifact was written.")}
 		var err := image.save_png(abs_path)
 		if err != OK:
 			frame = {
@@ -339,6 +348,8 @@ func _capture_view(scene_root: Node3D, targets: Array, bounds: AABB, view: Strin
 
 
 func _capture_view_async(scene_root: Node3D, targets: Array, bounds: AABB, view: String, width: int, height: int, artifact_dir: String, capture_id: String) -> Dictionary:
+	if _context == null or not _context.permission_enabled("allow_screenshots"):
+		return {"view": view, "status": "error", "error": _error_payload("permission_denied", "Screenshot capture permission is disabled.")}
 	var subviewport := SubViewport.new()
 	subviewport.name = "GodotCodexBridgeMultiViewViewport"
 	subviewport.size = Vector2i(width, height)
@@ -395,6 +406,9 @@ func _capture_view_async(scene_root: Node3D, targets: Array, bounds: AABB, view:
 			"render_diagnostics": _render_diagnostics(subviewport, camera, sampled_unique),
 		}
 	else:
+		if _context == null or not _context.permission_enabled("allow_screenshots"):
+			subviewport.queue_free()
+			return {"view": view, "status": "error", "error": _error_payload("permission_denied", "Screenshot capture permission was revoked before the artifact was written.")}
 		var err := image.save_png(abs_path)
 		if err != OK:
 			frame = {

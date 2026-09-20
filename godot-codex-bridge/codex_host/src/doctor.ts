@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { loadConfig } from "./config.js";
+import { resolveCodexCommand } from "./codexCommand.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -22,14 +23,14 @@ async function main(): Promise<void> {
   let codexCliVersion = "";
 
   try {
-    const codexExecutable = await resolveExecutable(config.codexBin);
-    const { stdout } = await runCodexVersion(config.codexBin, codexExecutable);
+    const command = resolveCodexCommand(config.codexBin, ["--version"]);
+    const { stdout } = await execFileAsync(command.file, command.args, { windowsHide: true, timeout: 10_000 });
     codexCliVersion = stdout.trim();
     findings.push({
       id: "codex_cli",
       status: "ok",
       message: codexCliVersion,
-      data: { executable: codexExecutable }
+      data: { executable: command.file, args: command.args }
     });
   } catch (error) {
     findings.push({
@@ -90,35 +91,6 @@ async function findPackageRoot(startDir: string): Promise<string> {
       throw new Error(`codex_host package root not found from ${startDir}`);
     }
     current = parent;
-  }
-}
-
-async function resolveExecutable(command: string): Promise<string> {
-  if (path.isAbsolute(command)) {
-    return command;
-  }
-
-  if (process.platform !== "win32") {
-    return command;
-  }
-
-  const { stdout } = await execFileAsync("where.exe", [command], { windowsHide: true });
-  const candidates = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return candidates.find((candidate) => candidate.toLowerCase().endsWith(".exe")) ?? candidates[0] ?? command;
-}
-
-async function runCodexVersion(command: string, executable: string): Promise<{ stdout: string }> {
-  try {
-    return await execFileAsync(executable, ["--version"], { windowsHide: true });
-  } catch (error) {
-    if (process.platform !== "win32" || command !== "codex") {
-      throw error;
-    }
-    const shell = process.env.ComSpec ?? "cmd.exe";
-    return execFileAsync(shell, ["/d", "/s", "/c", "codex --version"], { windowsHide: true });
   }
 }
 

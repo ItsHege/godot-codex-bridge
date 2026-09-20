@@ -8,8 +8,8 @@ This guide walks you through setting up Godot Codex Bridge from scratch on a cle
 
 Before starting, ensure you have installed:
 
-- **Godot Engine 4.x:** (Godot 4.3 stable or 4.7+). Ensure you have both standard and console binaries if on Windows.
-- **Node.js 20.11+** (includes `npm`).
+- **Godot Engine 4.7.1:** the tested baseline. Other 4.x versions need validation. Ensure you have both standard and console binaries on Windows.
+- **Node.js 22.14+** (includes `npm`); Node 24 LTS recommended.
 - **OpenAI Codex CLI** (or another MCP client such as Claude Desktop or Cursor).
 
 ---

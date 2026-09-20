@@ -17,6 +17,57 @@ static func truncate_text(text: String, limit := DEFAULT_MAX_MESSAGE_CHARS) -> S
 	return text.substr(0, limit) + "\n[truncated]"
 
 
+static func safe_rich_text(text: String) -> String:
+	var lines := text.split("\n", true)
+	var rendered := PackedStringArray()
+	var in_code_block := false
+	for raw_line in lines:
+		var line := str(raw_line)
+		if line.strip_edges().begins_with("```"):
+			if in_code_block:
+				rendered.append("[/code]")
+			else:
+				rendered.append("[code]")
+			in_code_block = not in_code_block
+			continue
+		var escaped := escape_bbcode(line)
+		if in_code_block:
+			rendered.append(escaped)
+			continue
+		if escaped.begins_with("- ") or escaped.begins_with("* "):
+			escaped = "• " + escaped.substr(2)
+		escaped = _replace_markup_pairs(escaped, "**", "[b]", "[/b]")
+		escaped = _replace_markup_pairs(escaped, "`", "[code]", "[/code]")
+		rendered.append(escaped)
+	if in_code_block:
+		rendered.append("[/code]")
+	return "\n".join(rendered)
+
+
+static func escape_bbcode(text: String) -> String:
+	return text.replace("[", "\uE000").replace("]", "\uE001").replace("\uE000", "[lb]").replace("\uE001", "[rb]")
+
+
+static func _replace_markup_pairs(text: String, marker: String, open_tag: String, close_tag: String) -> String:
+	var result := ""
+	var cursor := 0
+	while cursor < text.length():
+		var marker_index := text.find(marker, cursor)
+		if marker_index < 0:
+			result += text.substr(cursor)
+			break
+		var closing_index := text.find(marker, marker_index + marker.length())
+		if closing_index < 0:
+			result += text.substr(cursor)
+			break
+		result += text.substr(cursor, marker_index - cursor)
+		result += open_tag
+		result += text.substr(marker_index + marker.length(), closing_index - marker_index - marker.length())
+		result += close_tag
+		cursor = closing_index + marker.length()
+	return result
+
+
 static func should_collapse_text(text: String, collapse_chars := DEFAULT_COLLAPSE_CHARS, collapse_lines := DEFAULT_COLLAPSE_LINES) -> bool:
 	if text.length() > collapse_chars:
 		return true
@@ -85,7 +136,7 @@ static func compact_work_preview(text: String, preview_chars := DEFAULT_WORK_PRE
 static func work_batch_summary(update_count: int, text: String, preview_chars := DEFAULT_WORK_PREVIEW_CHARS, preview_lines := DEFAULT_WORK_PREVIEW_LINES) -> String:
 	var count: int = max(update_count, 1)
 	var suffix := "update" if count == 1 else "updates"
-	return "Work notes: " + str(count) + " " + suffix + ". " + compact_work_preview(text, preview_chars, preview_lines)
+	return "Work notes · " + str(count) + " " + suffix
 
 
 static func work_batch_toggle_text(visible: bool, update_count: int) -> String:

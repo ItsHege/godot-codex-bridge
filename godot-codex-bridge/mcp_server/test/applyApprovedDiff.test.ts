@@ -4,36 +4,33 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { applyApprovedDiff, APPLY_APPROVAL_TOKEN } from "../src/applyApprovedDiff.js";
+import { applyApprovedDiff } from "../src/applyApprovedDiff.js";
 
-test("applyApprovedDiff requires approval token", async () => {
-  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-apply-token-"));
-  const bridgeDir = path.join(projectRoot, ".godot", "godot_codex_bridge");
-  await fs.writeFile(path.join(projectRoot, "script.gd"), "extends Node\n", "utf8");
-
-  const result = await applyApprovedDiff(projectRoot, bridgeDir, {
-    path: "script.gd",
-    proposedContent: "extends Node\nfunc _ready(): pass\n",
-  });
-
-  assert.equal(result.status, "invalid_request");
-  assert.equal((result.error as { code: string }).code, "approval_token_required");
-});
-
-test("applyApprovedDiff writes approved content and creates undo snapshot", async () => {
-  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-apply-"));
+test("applyApprovedDiff fails closed for absent, altered, expired, replayed, cancelled, and legacy approvals", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-apply-disabled-"));
   const bridgeDir = path.join(projectRoot, ".godot", "godot_codex_bridge");
   const filePath = path.join(projectRoot, "script.gd");
-  await fs.writeFile(filePath, "extends Node\n", "utf8");
+  const original = "extends Node\n# sentinel: unchanged\n";
+  await fs.writeFile(filePath, original, "utf8");
 
-  const result = await applyApprovedDiff(projectRoot, bridgeDir, {
-    path: "script.gd",
-    proposedContent: "extends Node\nfunc _ready(): pass\n",
-    approvalToken: APPLY_APPROVAL_TOKEN,
-  });
+  const cases: Array<{ name: string; approvalToken?: string }> = [
+    { name: "missing" },
+    { name: "altered", approvalToken: "altered-receipt" },
+    { name: "expired", approvalToken: "expired-receipt" },
+    { name: "replayed", approvalToken: "replayed-receipt" },
+    { name: "cancelled", approvalToken: "cancelled-receipt" },
+    { name: "legacy-public-token", approvalToken: "APPROVE_GODOT_CODEX_BRIDGE_APPLY" },
+  ];
 
-  assert.equal(result.status, "ok");
-  assert.equal(result.applied, true);
-  assert.equal(await fs.readFile(filePath, "utf8"), "extends Node\nfunc _ready(): pass\n");
-  assert.equal((result.undo_snapshot as { status: string }).status, "ok");
+  for (const item of cases) {
+    const result = await applyApprovedDiff(projectRoot, bridgeDir, {
+      path: "script.gd",
+      proposedContent: `extends Node\n# attempted: ${item.name}\n`,
+      approvalToken: item.approvalToken,
+    });
+    assert.equal(result.status, "bridge_unavailable", item.name);
+    assert.equal(result.applied, false, item.name);
+    assert.equal((result.error as { code: string }).code, "trusted_approval_unavailable", item.name);
+    assert.equal(await fs.readFile(filePath, "utf8"), original, item.name);
+  }
 });
