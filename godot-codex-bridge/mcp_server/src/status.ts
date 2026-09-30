@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { assertPhysicalPathSync, readFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject, JsonValue, ServerConfig, ToolEnvelope } from "./types.js";
+import { projectIdentityHash } from "./projectIdentity.js";
 
 export const HEARTBEAT_STALE_MS = 5_000;
 export const SNAPSHOT_STALE_MS = 60_000;
@@ -37,18 +39,18 @@ export async function getBridgeStatus(
     snapshotStat,
     hostHealth,
   ] = await Promise.all([
-    pathExists(projectFile),
-    pathExists(addonPath),
-    pathExists(pluginCfgPath),
-    pathExists(config.bridgeDir),
+    physicalPathExists(config.projectRoot, projectFile),
+    physicalPathExists(config.projectRoot, addonPath),
+    physicalPathExists(config.projectRoot, pluginCfgPath),
+    physicalPathExists(config.projectRoot, config.bridgeDir),
     pathExists(config.godotExecutable),
-    readTextIfExists(projectFile),
-    readTextIfExists(pluginCfgPath),
-    readJsonFileIfExists(heartbeatPath),
-    readJsonFileIfExists(bridgeStatePath),
-    readJsonFileIfExists(snapshotPath),
-    statIfExists(heartbeatPath),
-    statIfExists(snapshotPath),
+    readTextIfExists(config.projectRoot, projectFile),
+    readTextIfExists(config.projectRoot, pluginCfgPath),
+    readJsonFileIfExists(config.projectRoot, heartbeatPath),
+    readJsonFileIfExists(config.projectRoot, bridgeStatePath),
+    readJsonFileIfExists(config.projectRoot, snapshotPath),
+    statIfExists(config.projectRoot, heartbeatPath),
+    statIfExists(config.projectRoot, snapshotPath),
     readHostHealth(config.hostRpcUrl),
   ]);
 
@@ -76,14 +78,23 @@ export async function getBridgeStatus(
   const snapshotSchemaCandidate = isJsonObject(snapshot);
   const hostProjectRoot = stringAt(hostHealth, ["activeProject", "projectRoot"]);
   const hostBridgeDir = stringAt(hostHealth, ["activeProject", "bridgeDir"]);
+  // Current Hosts publish only hashes of their attached project (the path is
+  // not exposed to unauthenticated callers); older Hosts published the paths.
+  const hostProjectHash = stringAt(hostHealth, ["project_identity", "project_root_sha256"]);
+  const hostBridgeDirHash = stringAt(hostHealth, ["project_identity", "bridge_dir_sha256"]);
   const projectIdentity = {
     editorProjectRoot: config.projectRoot,
     hostProjectRoot,
     editorBridgeDir: config.bridgeDir,
     hostBridgeDir,
     hostStatusAvailable: hostHealth !== undefined,
-    matches: hostProjectRoot === null ? null : samePath(config.projectRoot, hostProjectRoot),
-    bridgeDirMatches: hostBridgeDir === null ? null : samePath(config.bridgeDir, hostBridgeDir),
+    identitySource: hostProjectRoot !== null ? "path" : hostProjectHash !== null ? "hash" : null,
+    matches: hostProjectRoot !== null
+      ? samePath(config.projectRoot, hostProjectRoot)
+      : hostProjectHash !== null ? projectIdentityHash(config.projectRoot) === hostProjectHash : null,
+    bridgeDirMatches: hostBridgeDir !== null
+      ? samePath(config.bridgeDir, hostBridgeDir)
+      : hostBridgeDirHash !== null ? projectIdentityHash(config.bridgeDir) === hostBridgeDirHash : null,
   };
   const projectMismatch = projectIdentity.matches === false || projectIdentity.bridgeDirMatches === false;
 
@@ -152,8 +163,18 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function statIfExists(filePath: string): Promise<{ mtime: Date } | undefined> {
+async function physicalPathExists(rootPath: string, filePath: string): Promise<boolean> {
   try {
+    assertPhysicalPathSync(rootPath, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function statIfExists(rootPath: string, filePath: string): Promise<{ mtime: Date } | undefined> {
+  try {
+    assertPhysicalPathSync(rootPath, filePath, { requireFile: true });
     const stat = await fs.stat(filePath);
     return { mtime: stat.mtime };
   } catch {
@@ -161,16 +182,16 @@ async function statIfExists(filePath: string): Promise<{ mtime: Date } | undefin
   }
 }
 
-async function readTextIfExists(filePath: string): Promise<string | undefined> {
+async function readTextIfExists(rootPath: string, filePath: string): Promise<string | undefined> {
   try {
-    return await fs.readFile(filePath, "utf8");
+    return readFileInsideRootSync(rootPath, filePath).toString("utf8");
   } catch {
     return undefined;
   }
 }
 
-async function readJsonFileIfExists(filePath: string): Promise<JsonValue | undefined> {
-  const text = await readTextIfExists(filePath);
+async function readJsonFileIfExists(rootPath: string, filePath: string): Promise<JsonValue | undefined> {
+  const text = await readTextIfExists(rootPath, filePath);
   if (text === undefined) {
     return undefined;
   }

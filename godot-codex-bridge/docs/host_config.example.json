@@ -8,5 +8,5 @@
     "node_entry": "/path/to/godot-codex-bridge/godot-codex-bridge/codex_host/dist/src/index.js",
     "port": 49390,
     "runtime": "app-server",
-    "launch_mode": "local_hidden_process"
+    "launch_mode": "manual_trusted_install"
 }

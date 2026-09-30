@@ -3,6 +3,7 @@ extends Node
 const RuntimeStateModel := preload("res://addons/godot_codex_bridge/core/runtime_state_model.gd")
 const RuntimeEventsModel := preload("res://addons/godot_codex_bridge/core/runtime_events_model.gd")
 const PlaytestInputModel := preload("res://addons/godot_codex_bridge/core/playtest_input_model.gd")
+const BridgePathGuard := preload("res://addons/godot_codex_bridge/core/bridge_path_guard.gd")
 
 @export var enabled := true
 @export_range(0.25, 10.0, 0.25) var write_interval_seconds := 1.0
@@ -56,6 +57,10 @@ func record_event(event_type: String, payload: Dictionary = {}) -> Dictionary:
 func _consume_playtest_input_commands() -> void:
 	if _input_commands_path == "" or not FileAccess.file_exists(_input_commands_path):
 		return
+	var command_guard := BridgePathGuard.validate_project_path(ProjectSettings.globalize_path("res://"), _input_commands_path, false)
+	if not bool(command_guard.get("ok", false)):
+		_record_event("playtest_input_failed", command_guard.get("error", {}))
+		return
 	var file := FileAccess.open(_input_commands_path, FileAccess.READ)
 	if file == null:
 		_record_event("playtest_input_failed", {
@@ -90,6 +95,9 @@ func _consume_playtest_input_commands() -> void:
 func _read_playtest_session() -> Dictionary:
 	if _input_session_path == "" or not FileAccess.file_exists(_input_session_path):
 		return {}
+	var session_guard := BridgePathGuard.validate_project_path(ProjectSettings.globalize_path("res://"), _input_session_path, false)
+	if not bool(session_guard.get("ok", false)):
+		return {}
 	var file := FileAccess.open(_input_session_path, FileAccess.READ)
 	if file == null:
 		return {}
@@ -103,16 +111,11 @@ func _read_playtest_session() -> Dictionary:
 
 func _write_state(reason: String) -> Dictionary:
 	var dir_path := _state_path.get_base_dir()
-	var dir_result := DirAccess.make_dir_recursive_absolute(dir_path)
-	if dir_result != OK:
+	var dir_result := BridgePathGuard.ensure_project_directory(ProjectSettings.globalize_path("res://"), dir_path)
+	if not bool(dir_result.get("ok", false)):
 		return {
 			"ok": false,
-			"error": {
-				"code": "runtime_state_dir_failed",
-				"message": "Failed to create runtime state directory.",
-				"godot_error": dir_result,
-				"path": dir_path,
-			},
+			"error": dir_result.get("error", {"code": "runtime_state_dir_failed", "message": "Failed to create a safe runtime state directory.", "path": dir_path}),
 		}
 
 	var state := RuntimeStateModel.collect_state(get_tree(), {
@@ -121,6 +124,9 @@ func _write_state(reason: String) -> Dictionary:
 		"max_depth": max_depth,
 	})
 	_record_state_transition_events(state)
+	var state_guard := BridgePathGuard.validate_project_path(ProjectSettings.globalize_path("res://"), _state_path, true)
+	if not bool(state_guard.get("ok", false)):
+		return state_guard
 	var file := FileAccess.open(_state_path, FileAccess.WRITE)
 	if file == null:
 		return {
@@ -203,22 +209,20 @@ func _record_event(event_type: String, payload: Dictionary = {}) -> Dictionary:
 
 func _write_events(reason: String) -> Dictionary:
 	var dir_path := _events_path.get_base_dir()
-	var dir_result := DirAccess.make_dir_recursive_absolute(dir_path)
-	if dir_result != OK:
+	var dir_result := BridgePathGuard.ensure_project_directory(ProjectSettings.globalize_path("res://"), dir_path)
+	if not bool(dir_result.get("ok", false)):
 		return {
 			"ok": false,
-			"error": {
-				"code": "runtime_events_dir_failed",
-				"message": "Failed to create runtime events directory.",
-				"godot_error": dir_result,
-				"path": dir_path,
-			},
+			"error": dir_result.get("error", {"code": "runtime_events_dir_failed", "message": "Failed to create a safe runtime events directory.", "path": dir_path}),
 		}
 	var document := RuntimeEventsModel.build_document(_events, {
 		"max_events": max_events,
 		"source": "res://addons/godot_codex_bridge/runtime_state_probe.gd",
 		"reason": reason,
 	})
+	var events_guard := BridgePathGuard.validate_project_path(ProjectSettings.globalize_path("res://"), _events_path, true)
+	if not bool(events_guard.get("ok", false)):
+		return events_guard
 	var file := FileAccess.open(_events_path, FileAccess.WRITE)
 	if file == null:
 		return {

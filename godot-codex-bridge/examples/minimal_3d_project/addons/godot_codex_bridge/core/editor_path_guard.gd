@@ -52,16 +52,38 @@ static func validate_scene_local_node_path(node_path: String) -> Dictionary:
 	return {}
 
 
+## Also rejects backslashes and segments ending in "." or " ": Windows strips
+## those on open, so "res://.godot./x" or "res://.godot /x" would alias ".godot".
 static func validate_resource_segments(resource_path: String) -> Dictionary:
+	if resource_path.find("\\") >= 0:
+		return error_payload("invalid_resource_path_segment", "Resource paths cannot contain backslashes.")
 	var parts := resource_path.split("/")
 	for part in parts:
 		if part == "" or part == "." or part == "..":
 			return error_payload("invalid_resource_path_segment", "Resource paths cannot contain empty, current-directory or parent-directory segments.")
+		if part.ends_with(".") or part.ends_with(" "):
+			return error_payload("invalid_resource_path_segment", "Resource path segments cannot end with a dot or space.")
 	return {}
 
 
+## Case-insensitive (Windows/macOS filesystems fold case) and tolerant of
+## Windows aliases: trailing dots/spaces and NTFS ":stream" suffixes are
+## ignored when comparing, and backslashes count as separators.
 static func is_generated_resource_path(resource_path: String) -> bool:
-	return resource_path.begins_with(".godot/") or resource_path.begins_with(".import/") or resource_path.find("/.import/") >= 0
+	var parts := resource_path.replace("\\", "/").split("/", false)
+	for index in range(parts.size()):
+		var name := _comparable_segment(parts[index])
+		if name == ".import" or (index == 0 and name == ".godot"):
+			return true
+	return false
+
+
+static func _comparable_segment(segment: String) -> String:
+	var name := segment
+	var stream := name.find(":")
+	if stream >= 0:
+		name = name.substr(0, stream)
+	return name.to_lower().rstrip(". ")
 
 
 static func extension_allowed(lower_resource_path: String, allowed_extensions: Array) -> bool:

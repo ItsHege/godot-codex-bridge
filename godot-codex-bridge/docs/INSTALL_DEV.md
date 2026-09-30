@@ -26,7 +26,7 @@ target project.
 ## Codex Compatibility
 
 The host uses Codex app-server. Its checked-in generated schema lock was
-regenerated from Codex CLI 0.151.0. Targeted protocol and mock regressions cover
+regenerated from Codex CLI 0.156.1. Targeted protocol and mock regressions cover
 that runtime; authenticated runtime compatibility remains unvalidated.
 This does not imply full compatibility with the latest Codex release. Run the
 host doctor, compare version-specific schemas and validate approval/stream
@@ -43,9 +43,10 @@ Check the executable/version printed by host doctor; select
 schemas with the same binary. Never treat shell `codex --version` alone as proof
 of which runtime the Bridge launches.
 
-The current addon UI cannot faithfully review managed network, terminal-input
-or explicit-environment approvals, so the host denies those requests with a
-visible explanation. Ordinary local command/file approvals retain their gates.
+The current addon UI cannot faithfully review managed network, terminal-input,
+explicit-environment, command-policy, persistent write-root or permission-grant
+requests, so the host denies those scopes with a visible explanation. Ordinary
+local command/file approvals retain their one-use gates and active-turn binding.
 Server-resolved approval invalidation uses exact request identity, and reasoning
 options are populated from a bounded runtime-reported inventory with a legacy
 fallback.
@@ -86,6 +87,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_addon.ps1 -P
 dist\addon_package\godot-codex-bridge-addon-<version>
 dist\addon_package\godot-codex-bridge-addon-<version>.zip
 ```
+
+Packaging refuses to replace an existing package or zip by default. After
+reviewing the exact output path, use
+`npm run package:addon -- -ReplaceExistingPackage` for an intentional rebuild.
 
 The package includes `package_manifest.json` and only the installable
 `addons\godot_codex_bridge` tree. Target projects should install from this
@@ -145,10 +150,10 @@ npm run doctor
 The MCP server also exposes `godot.bridge_status`, which reports addon path,
 project root, plugin enabled status when detectable, heartbeat age, snapshot
 age, protocol version, addon version, and active/stale editor state.
-It also reports addon request transport. A correctly installed addon with
-`addons\godot_codex_bridge\host_config.json` should show
-`preferred: host_websocket_rpc`; `file_polling` means the compatibility fallback
-is in use because Host RPC is missing or unavailable.
+It also reports addon request transport. The Host HTTP relay is temporarily
+disabled while its MCP authentication contract is designed; addon-backed MCP
+requests currently use project-local file polling. A discovered Host URL in
+`host_config.json` does not mean HTTP forwarding is enabled.
 
 Visible editor validation can be automated for the fixture from the product
 root:
@@ -174,28 +179,22 @@ This starts the local Codex Host with the mock runtime, attaches the fixture
 project, validates foreground chat streaming, validates a read-only background
 team review, and validates the nonce/diff-hash approval response path.
 
-Visible editor Codex Chat validation:
+Restricted visible editor and mock chat validation:
 
 ```powershell
 cd godot-codex-bridge
-npm run validate:visible-chat-editor
-npm run validate:visible-chat-editor:auto-start
-npm run validate:visible-chat-editor:real
+npm run validate:restricted-fixture
 ```
 
-This starts a mock Codex Host, launches the fixture in a visible Godot editor,
-waits for the addon to attach the project to the host, then drives the addon's
-own chat request path for a foreground chat turn, background team review and
-approval response. It writes
-`.godot\godot_codex_bridge\artifacts\visible_chat_editor_validation.json`.
-The `:auto-start` variant does not pre-start the host. It refreshes the fixture
-addon install, verifies `addons\godot_codex_bridge\host_config.json`, presses
-the addon's connect path, and expects the Godot addon to start the local Codex
-Host itself.
-The `:real` variant uses the installed `codex app-server` for one visible
-editor foreground chat turn and requires the fixture `AGENTS.md` marker in the
-response. It writes
-`.godot\godot_codex_bridge\artifacts\visible_chat_editor_real_app_server_validation.json`.
+This command runs the out-of-band restricted fixture driver. It creates a fresh
+temporary project and first observes the editor with no Host, then starts a
+mock Host from the trusted product checkout and checks connection, inspection,
+screenshot permission, fixture-only Eye Attach capture, and a mock chat turn.
+The driver records JSON evidence in that temporary project and stops its own
+processes. It does not use the removed production validation routes or an
+account. The older visible chat validator and its real-account variant are not
+supported restricted-build gates; previous broad UX and approval scenarios
+are not implied by this fixture pass. See `RESTRICTED_BUILD.md`.
 
 Real app-server background validation:
 
@@ -211,11 +210,29 @@ fixture and writes
 
 ## Codex Chat Troubleshooting
 
-Normal use should not require a terminal. After installing the addon through
-`scripts\install_addon.ps1 -Apply`, press `Connect` in the Godot `Codex Chat`
-dock. The addon reads `addons\godot_codex_bridge\host_config.json`, starts the
-local Codex Host in the background, waits briefly for it to become available
-and then attaches the current project.
+After installing the addon through `scripts\install_addon.ps1 -Apply`, inspect
+and explicitly start Codex Host from the trusted installation. The installation
+must be a separate tree from the target project:
+
+```powershell
+npm run start:codex-host -- -Inspect -ProjectRoot "<your Godot project>" -Runtime app-server -CodexExecutable "<absolute codex.exe>"
+npm run start:codex-host -- -Start -ProjectRoot "<your Godot project>" -Runtime app-server -CodexExecutable "<absolute codex.exe>"
+```
+
+Review the displayed installation, executable and entrypoint paths, runtime,
+ports, and fingerprint. In the second command type the exact requested `START`
+line. A changed build or configuration needs a fresh decision. `STOP` stops
+only the Host owned by that launcher; an occupied port is never killed.
+The prompt verifies operator intent in a terminal, not the OS identity of a
+human; native same-user code could script it. Do not run untrusted executable
+project scripts during this restricted workflow. The launcher checks its owned
+Host through a health proof without returning the nonce to callers. After
+`HOST_READY`, copy the 64-character pairing secret shown in the trusted
+launcher terminal. Press `Connect` in the Godot `Codex Chat` dock and paste it
+into the pairing dialog. The addon holds the secret only for this connection
+and asks again after disconnect. The addon reads
+`addons\godot_codex_bridge\host_config.json` for loopback connection metadata,
+then pairs with the running Host before attaching the current project.
 
 If the chat shows `Tools: missing`, press `Enable Tools`. This registers the
 local `godot_codex_bridge` MCP server in Codex app-server config, reloads MCP
@@ -234,26 +251,15 @@ cd godot-codex-bridge
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_addon.ps1 -ProjectRoot "<your Godot project>" -Apply -Replace
 ```
 
-For host-only developer debugging, you can still start the local host manually:
+The addon does not execute project-local launcher paths. When the Host is
+missing, Connect reports the manual-start requirement without spawning Node or
+PowerShell from `host_config.json`. If connection metadata is missing or invalid,
+Connect reports an install/configuration error instead of using a default port.
 
-```powershell
-cd godot-codex-bridge
-npm run start:codex-host -- -Runtime app-server
-```
-
-The addon does not auto-retry forever when the host is missing; it performs one
-connect-triggered auto-start attempt with a bounded retry window so the editor
-log does not fill with repeated connect/disconnect messages.
-
-Host lifecycle:
-
-- If the Godot addon starts Codex Host from `host_config.json`, it owns that
-  process for the current editor session.
-- When Godot closes or the addon is disabled, the addon sends `host.shutdown`
-  and then falls back to stopping only that owned host process if it is still
-  alive.
-- Codex Host shutdown closes its WebSocket clients, stops background tasks, and
-  shuts down the Codex app-server child process.
+Host lifecycle: start Host from the trusted installation. Its normal shutdown
+closes WebSocket clients, stops background tasks, and shuts down the Codex
+app-server child process; the addon does not own or kill manually started Host
+processes.
 - If you started Codex Host manually in a terminal for development, the addon
   only disconnects from it; it does not treat that manual process as owned.
 
@@ -344,8 +350,9 @@ npm test
 - `godot.editor_focus_panel` can focus known native Godot panels such as
   Output, Debugger, Audio, Animation and Shader Editor. It is navigation-only
   and does not clear native diagnostic panels.
-- `godot.fix_selected_node` requires a live editor, dock permission, approval
-  token and Godot undo/redo support.
+- `godot.fix_selected_node` is temporarily disabled pending a trusted,
+  state-bound, single-use human approval receipt. Make the change directly in
+  the Godot editor so its normal UndoRedo workflow applies.
 - `background.start`, `background.status` and `background.cancel` run
   read-only Codex Host team reviews and persist local role/summary artifacts
   under `.godot\godot_codex_bridge\codex_host\background_tasks`.
@@ -409,12 +416,12 @@ request polling and screenshot capture evidence.
 5. Capture Screenshot creates a PNG under
    `.godot\godot_codex_bridge\artifacts\screenshots` or returns a structured
    failure without Godot null-parameter errors.
-6. `godot.bridge_status` reports `addon_request_transport.preferred` as
-   `host_websocket_rpc` when the local addon `host_config.json` can be read, or
-   `file_polling` when the fallback path is the only configured route.
-7. An MCP screenshot/request call succeeds through Host RPC when available; the
-   fallback path writes a request under `requests\` and receives a matching
-   response under `responses\`.
+6. `godot.bridge_status` reports a discovered Host URL when the local addon
+   `host_config.json` can be read. This is configuration metadata, not evidence
+   that HTTP forwarding is enabled.
+7. An MCP screenshot/request call uses file polling: it writes one request
+   under `requests\` and receives the matching response under `responses\`.
+   A configured Host HTTP attempt returns 503 with `bridge_rpc_unavailable`.
 8. Eye Attach can capture the editor window, attach one marker, and clear the
    pending marker after the next chat send.
 

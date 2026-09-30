@@ -388,32 +388,150 @@ test("readProjectFile rejects absolute, traversal, and generated paths", async (
   assertInvalid(bridgeAddon, "generated_path_rejected");
 });
 
-test("searchProjectFiles finds text matches with context and skips generated files", async () => {
-  const previous = process.env.GODOT_CODEX_BRIDGE_DISABLE_RG;
-  process.env.GODOT_CODEX_BRIDGE_DISABLE_RG = "1";
-  try {
-    const projectRoot = await makeAwarenessFixture();
-    const result = await searchProjectFiles(projectRoot, {
-      query: "const action_ids",
-      globs: ["*.gd"],
-      contextLines: 1,
-      limit: 5,
-    });
+test("secret-bearing files are never read or searched", async () => {
+  const projectRoot = await makeAwarenessFixture();
+  await fs.writeFile(path.join(projectRoot, ".env"), "API_TOKEN=secret-token-value\n", "utf8");
+  await fs.writeFile(path.join(projectRoot, ".env.local"), "API_TOKEN=secret-token-value\n", "utf8");
+  await fs.writeFile(path.join(projectRoot, "release.keystore"), "secret-token-value", "utf8");
+  await fs.writeFile(path.join(projectRoot, "credentials.json"), "{\"token\":\"secret-token-value\"}", "utf8");
 
-    assert.equal(result.status, "ok");
-    assert.equal(result.search_engine, "node_fallback");
-    assert.equal(result.returned_count, 1);
-    const matches = result.matches as Array<{ path: string; line: number; context_before: unknown[] }>;
-    assert.equal(matches[0].path, "scripts/player.gd");
-    assert.equal(matches[0].line, 5);
-    assert.equal(matches[0].context_before.length, 1);
-  } finally {
-    if (previous === undefined) {
-      delete process.env.GODOT_CODEX_BRIDGE_DISABLE_RG;
-    } else {
-      process.env.GODOT_CODEX_BRIDGE_DISABLE_RG = previous;
-    }
+  for (const secret of [".env", ".env.local", "release.keystore", "credentials.json"]) {
+    assertInvalid(await readProjectFile(projectRoot, { path: secret }), "secret_path_rejected");
   }
+  const search = await searchProjectFiles(projectRoot, { query: "secret-token-value" });
+  assert.equal(search.returned_count, 0, "secret file contents must not be searchable");
+  const listed = await listProjectFiles(projectRoot, {});
+  const files = (listed.files as Array<{ path: string }>).map((file) => file.path);
+  assert.equal(files.some((file) => file.startsWith(".env") || file.endsWith(".keystore") || file === "credentials.json"), false);
+  const skipped = listed.skipped as Array<{ path: string; code: string }>;
+  assert.equal(skipped.find((entry) => entry.path === ".env")?.code, "secret_path_rejected");
+});
+
+test("searchProjectFiles uses the bounded in-process search path", async () => {
+  const projectRoot = await makeAwarenessFixture();
+  const result = await searchProjectFiles(projectRoot, {
+    query: "const action_ids",
+    globs: ["*.gd"],
+    contextLines: 1,
+    limit: 5,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.search_engine, "node_fallback");
+  assert.equal(result.returned_count, 1);
+  const matches = result.matches as Array<{ path: string; line: number; context_before: unknown[] }>;
+  assert.equal(matches[0].path, "scripts/player.gd");
+  assert.equal(matches[0].line, 5);
+  assert.equal(matches[0].context_before.length, 1);
+});
+
+test("searchProjectFiles stops at the aggregate inspection budget", async () => {
+  const projectRoot = await makeAwarenessFixture();
+  const budgetRoot = path.join(projectRoot, "scripts", "search-budget");
+  await fs.mkdir(budgetRoot, { recursive: true });
+  const largeSearchFile = "# bounded search fixture\n" + "x".repeat(900_000);
+  await Promise.all(
+    Array.from({ length: 5 }, (_, index) =>
+      fs.writeFile(path.join(budgetRoot, `budget-${index}.gd`), largeSearchFile, "utf8"),
+    ),
+  );
+
+  const result = await searchProjectFiles(projectRoot, {
+    query: "query-that-is-not-present",
+    globs: ["*.gd"],
+    limit: 5,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.search_engine, "node_fallback");
+  assert.equal(result.returned_count, 0);
+  assert.equal(result.truncated, true);
+  assert.equal(result.truncation_reason, "search_inspected_byte_budget_reached");
+  const limits = result.inspection_limits as { max_bytes: number };
+  assert.ok((result.inspected_byte_count as number) <= limits.max_bytes);
+  const skipped = result.skipped as Array<{ code: string }>;
+  assert.equal(skipped.some((item) => item.code === "search_inspected_byte_budget_reached"), true);
+});
+
+test("searchProjectFiles bounds matching file inspection before the project index maximum", async () => {
+  const projectRoot = await makeAwarenessFixture();
+  const budgetRoot = path.join(projectRoot, "scripts", "file-budget");
+  await fs.mkdir(budgetRoot, { recursive: true });
+  await Promise.all(
+    Array.from({ length: 300 }, (_, index) =>
+      fs.writeFile(path.join(budgetRoot, `budget-${String(index).padStart(3, "0")}.gd`), "extends Node\n", "utf8"),
+    ),
+  );
+
+  const result = await searchProjectFiles(projectRoot, {
+    query: "query-that-is-not-present",
+    globs: ["*.gd"],
+    limit: 5,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.truncated, true);
+  assert.equal(result.index_truncated, false);
+  assert.equal(result.truncation_reason, "search_inspected_file_budget_reached");
+  assert.equal(result.inspected_file_count, 256);
+});
+
+test("searchProjectFiles applies its own index cap before content inspection", async () => {
+  const projectRoot = await makeAwarenessFixture();
+  const indexRoot = path.join(projectRoot, "aaa-index-budget");
+  await fs.mkdir(indexRoot, { recursive: true });
+  for (let batchStart = 0; batchStart < 1_100; batchStart += 100) {
+    await Promise.all(
+      Array.from({ length: Math.min(100, 1_100 - batchStart) }, (_, batchOffset) => {
+        const index = batchStart + batchOffset;
+        return fs.writeFile(path.join(indexRoot, `entry-${String(index).padStart(4, "0")}.txt`), "bounded\n", "utf8");
+      }),
+    );
+  }
+
+  const result = await searchProjectFiles(projectRoot, {
+    query: "query-that-is-not-present",
+    globs: ["*.gd"],
+    limit: 5,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.truncated, true);
+  assert.equal(result.index_truncated, true);
+  assert.equal(result.index_truncation_reason, "project_index_file_budget_reached");
+  assert.equal(result.truncation_reason, "project_index_file_budget_reached");
+  const limits = result.inspection_limits as { max_indexed_files: number };
+  assert.equal(result.indexed_file_count, limits.max_indexed_files);
+  assert.equal(result.inspected_file_count, 0);
+});
+
+test("searchProjectFiles streams and caps a single wide directory", async () => {
+  const projectRoot = await makeAwarenessFixture();
+  const wideRoot = path.join(projectRoot, "aaa-wide-directory");
+  await fs.mkdir(wideRoot, { recursive: true });
+  for (let batchStart = 0; batchStart < 2_100; batchStart += 100) {
+    await Promise.all(
+      Array.from({ length: Math.min(100, 2_100 - batchStart) }, (_, batchOffset) => {
+        const index = batchStart + batchOffset;
+        return fs.writeFile(path.join(wideRoot, `entry-${String(index).padStart(4, "0")}.txt`), "bounded\n", "utf8");
+      }),
+    );
+  }
+
+  const result = await searchProjectFiles(projectRoot, {
+    query: "query-that-is-not-present",
+    globs: ["*.gd"],
+    limit: 5,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.truncated, true);
+  assert.equal(result.index_truncated, true);
+  assert.equal(result.index_truncation_reason, "project_index_entry_budget_reached");
+  assert.equal(result.truncation_reason, "project_index_entry_budget_reached");
+  const limits = result.inspection_limits as { max_indexed_entries: number };
+  assert.equal(result.traversed_entry_count, limits.max_indexed_entries);
+  assert.equal(result.inspected_file_count, 0);
 });
 
 test("getAgentsContext returns root-bounded AGENTS previews", async () => {

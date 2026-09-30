@@ -3,6 +3,13 @@ extends RefCounted
 
 const ChatDiffModel := preload("chat_diff_model.gd")
 const ChatTranscriptModel := preload("chat_transcript_model.gd")
+const ChatSessionAllowModel := preload("chat_session_allow_model.gd")
+## UI decision for "Allow this session": sent as decision "approve" plus
+## remember_for_session: true.
+const DECISION_APPROVE_REMEMBER := "approve_remember"
+const MAX_APPROVAL_FILES := 24
+const MAX_APPROVAL_DIFF_LINES_PER_FILE := 360
+const MAX_APPROVAL_COMMAND_CHARS := 1000
 
 
 static func can_approve(params: Dictionary) -> bool:
@@ -16,8 +23,10 @@ static func can_approve(params: Dictionary) -> bool:
 		return false
 	var kind := str(params.get("kind", "unknown"))
 	if kind == "file_change" or kind == "apply_patch":
-		return str(params.get("diff_hash", "")) != ""
-	if kind == "elicitation" or kind == "command_execution" or kind == "exec_command":
+		return str(params.get("diff_hash", "")) != "" and _diff_is_fully_reviewable(params)
+	if kind == "command_execution" or kind == "exec_command":
+		return str(params.get("command", "")).length() <= MAX_APPROVAL_COMMAND_CHARS
+	if kind == "elicitation":
 		return true
 	if not bool(params.get("approvable_by_chat", false)):
 		return false
@@ -28,7 +37,17 @@ static func can_approve_session(params: Dictionary) -> bool:
 	if not can_approve(params):
 		return false
 	var kind := str(params.get("kind", "unknown"))
-	return kind == "command_execution" or kind == "exec_command" or kind == "file_change" or kind == "apply_patch"
+	return kind == "command_execution" or kind == "exec_command"
+
+
+## Only a plain approvable card that the Host marked with a Godot tool name.
+static func can_allow_session_tool(params: Dictionary) -> bool:
+	if not can_approve(params):
+		return false
+	var kind := str(params.get("kind", ""))
+	if kind in ["file_change", "apply_patch", "command_execution", "exec_command"]:
+		return false
+	return ChatSessionAllowModel.tool_name(params) != ""
 
 
 static func disabled_reason(params: Dictionary) -> String:
@@ -44,9 +63,36 @@ static func disabled_reason(params: Dictionary) -> String:
 		return "Approval nonce is missing."
 	if (kind == "file_change" or kind == "apply_patch") and str(params.get("diff_hash", "")) == "":
 		return "Diff hash is missing, so Codex cannot prove the approved content matches the displayed diff."
+	if (kind == "file_change" or kind == "apply_patch") and not _diff_is_fully_reviewable(params):
+		return "The full diff does not fit the approval review surface. Ask Codex to split the change before approving."
+	if (kind == "command_execution" or kind == "exec_command") and str(params.get("command", "")).length() > MAX_APPROVAL_COMMAND_CHARS:
+		return "The full command does not fit the approval review surface. Ask Codex to shorten or split it before approving."
 	if kind != "elicitation" and kind != "file_change" and kind != "apply_patch" and kind != "command_execution" and kind != "exec_command":
 		return "Only file diffs, commands and Codex user questions can be approved from Godot chat. Permission grants stay blocked."
 	return "Approval is not available."
+
+
+static func _diff_is_fully_reviewable(params: Dictionary) -> bool:
+	var changes: Variant = params.get("file_changes", params.get("diff_evidence", null))
+	var items: Array = []
+	if changes is Dictionary:
+		if changes.is_empty() or changes.size() > MAX_APPROVAL_FILES:
+			return false
+		items = (changes as Dictionary).values()
+	elif changes is Array:
+		if changes.is_empty() or changes.size() > MAX_APPROVAL_FILES:
+			return false
+		items = changes
+	else:
+		return false
+	for raw_item in items:
+		if not raw_item is Dictionary:
+			return false
+		var item := raw_item as Dictionary
+		var diff_text := str(item.get("unified_diff", item.get("diff", "")))
+		if diff_text == "" or diff_text.split("\n").size() > MAX_APPROVAL_DIFF_LINES_PER_FILE:
+			return false
+	return true
 
 
 static func approval_summary(params: Dictionary, command_limit := 1000, file_path_limit := 12) -> String:
@@ -269,6 +315,13 @@ static func response_plan(params: Dictionary, decision: String, note: String, so
 			"system_message": "Approve is blocked: " + disabled_reason(params),
 			"update_ui": true,
 		}
+	if decision == DECISION_APPROVE_REMEMBER and not can_allow_session_tool(params):
+		return {
+			"ok": false,
+			"action": "status",
+			"system_message": "Allow this session is not available for this request.",
+			"update_ui": true,
+		}
 	if decision == "approve_session" and not can_approve_session(params):
 		return {
 			"ok": false,
@@ -288,14 +341,19 @@ static func response_plan(params: Dictionary, decision: String, note: String, so
 			"action": "status",
 			"system_message": "Approval nonce is missing; response was not sent.",
 		}
+	var remember := decision == DECISION_APPROVE_REMEMBER
+	var payload := response_payload(params, "approve" if remember else decision, note)
+	if remember:
+		payload["remember_for_session"] = true
+	var approving := decision == "approve" or decision == "approve_session" or remember
 	return {
 		"ok": true,
 		"method": "approval.respond",
-		"params": response_payload(params, decision, note),
-		"detail_message": "Approval response sent: " + decision,
-		"clear_approval": decision != "approve" and decision != "approve_session",
+		"params": payload,
+		"detail_message": "Approval response sent: " + ("approve (allowed this session: " + ChatSessionAllowModel.tool_name(params) + ")" if remember else decision),
+		"clear_approval": not approving,
 		"clear_message": "Approval " + decision + " sent.",
-		"update_ui": decision == "approve" or decision == "approve_session",
+		"update_ui": approving,
 	}
 
 

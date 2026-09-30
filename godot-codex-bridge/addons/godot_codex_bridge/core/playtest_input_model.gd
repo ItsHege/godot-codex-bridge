@@ -367,10 +367,9 @@ func _write_command(document: Dictionary) -> Dictionary:
 	if _command_path_abs == "":
 		return _err("playtest_input_path_unavailable", "Playtest input command path is unavailable.")
 	if _context != null:
-		_context.ensure_dirs()
-		var dir_result := DirAccess.make_dir_recursive_absolute(_command_path_abs.get_base_dir())
-		if dir_result != OK:
-			return _err("playtest_input_dir_failed", "Failed to create playtest input command directory.", {"godot_error": dir_result})
+		var dir_result := _context.ensure_safe_dir(_command_path_abs.get_base_dir())
+		if not bool(dir_result.get("ok", false)):
+			return dir_result
 		var write_result := _context.write_json(_command_path_abs, document)
 		if bool(write_result.get("ok", false)):
 			return write_result
@@ -388,10 +387,9 @@ func _write_session(document: Dictionary) -> Dictionary:
 	if _session_path_abs == "":
 		return _err("playtest_session_path_unavailable", "Playtest input session path is unavailable.")
 	if _context != null:
-		_context.ensure_dirs()
-		var dir_result := DirAccess.make_dir_recursive_absolute(_session_path_abs.get_base_dir())
-		if dir_result != OK:
-			return _err("playtest_session_dir_failed", "Failed to create playtest input session directory.", {"godot_error": dir_result})
+		var dir_result := _context.ensure_safe_dir(_session_path_abs.get_base_dir())
+		if not bool(dir_result.get("ok", false)):
+			return dir_result
 		return _context.write_json(_session_path_abs, document)
 	var file := FileAccess.open(_session_path_abs, FileAccess.WRITE)
 	if file == null:

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { projectIdentityHash } from "../src/projectIdentity.js";
 import { getBridgeStatus } from "../src/status.js";
 import type { ServerConfig } from "../src/types.js";
 
@@ -64,6 +65,7 @@ test("getBridgeStatus reports live addon metadata", async () => {
     editorBridgeDir: config.bridgeDir,
     hostBridgeDir: null,
     hostStatusAvailable: false,
+    identitySource: null,
     matches: null,
     bridgeDirMatches: null,
   });
@@ -92,6 +94,7 @@ test("getBridgeStatus reports matching host and editor project roots", async () 
       editorBridgeDir: config.bridgeDir,
       hostBridgeDir: config.bridgeDir,
       hostStatusAvailable: true,
+      identitySource: "path",
       matches: true,
       bridgeDirMatches: true,
     });
@@ -117,10 +120,40 @@ test("getBridgeStatus reports project mismatch when host is attached elsewhere",
       editorBridgeDir: config.bridgeDir,
       hostBridgeDir: otherBridgeDir,
       hostStatusAvailable: true,
+      identitySource: "path",
       matches: false,
       bridgeDirMatches: false,
     });
   });
+});
+
+test("getBridgeStatus detects a mismatch from hashed Host project identity", async () => {
+  const config = await makeConfig();
+  await writeReadyBridge(config);
+  await withHostHealth(config.projectRoot, config.bridgeDir, async (hostRpcUrl) => {
+    config.hostRpcUrl = hostRpcUrl;
+    const result = await getBridgeStatus(config);
+    assert.equal(result.project_mismatch, false);
+    const identity = result.project_identity as Record<string, unknown>;
+    assert.equal(identity.identitySource, "hash");
+    assert.equal(identity.hostProjectRoot, null, "the Host path is not revealed");
+    assert.equal(identity.matches, true);
+  }, "hash");
+  const otherProjectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-status-other-hash-"));
+  await withHostHealth(otherProjectRoot, path.join(otherProjectRoot, ".godot", "godot_codex_bridge"), async (hostRpcUrl) => {
+    config.hostRpcUrl = hostRpcUrl;
+    const result = await getBridgeStatus(config);
+    assert.equal(result.readiness, "project_mismatch");
+    assert.equal((result.project_identity as Record<string, unknown>).matches, false);
+  }, "hash");
+});
+
+test("project identity hash matches the Codex Host algorithm", () => {
+  assert.equal(
+    projectIdentityHash("C:\\Games\\My Game\\", "win32"),
+    projectIdentityHash("c:/games/my game", "win32"),
+  );
+  assert.match(projectIdentityHash("/games/demo", "linux"), /^[0-9a-f]{64}$/);
 });
 
 test("getBridgeStatus reports host websocket RPC transport when configured", async () => {
@@ -224,18 +257,16 @@ async function withHostHealth(
   projectRoot: string,
   bridgeDir: string,
   callback: (hostRpcUrl: string) => Promise<void>,
+  identity: "path" | "hash" = "path",
 ): Promise<void> {
   let server!: Server;
   await new Promise<void>((resolve, reject) => {
     server = createServer((request, response) => {
       if (request.url === "/health") {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({
-          activeProject: {
-            projectRoot,
-            bridgeDir,
-          },
-        }));
+        response.end(JSON.stringify(identity === "path"
+          ? { activeProject: { projectRoot, bridgeDir } }
+          : { project_identity: { project_root_sha256: projectIdentityHash(projectRoot), bridge_dir_sha256: projectIdentityHash(bridgeDir) } }));
         return;
       }
       response.writeHead(404, { "content-type": "application/json" });

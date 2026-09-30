@@ -8,6 +8,8 @@ var _action_executor: Callable = Callable()
 var _handlers: Dictionary = {}
 var _max_batch_actions := 12
 var _context_snapshot_path := ".godot/godot_codex_bridge/context_snapshot.json"
+## Optional editor_undo.gd instance (begin_tracking/end_tracking).
+var undo_tracker: Object = null
 
 
 func _init(
@@ -82,7 +84,12 @@ func execute_action(action: String, params: Dictionary) -> Dictionary:
 		return _editor_batch_request(params)
 	if _handlers.has(action):
 		var handler: Callable = _handlers[action]
+		# Every Bridge UndoRedo commit goes through here, so the undo tracker can
+		# record exactly which history each Bridge action landed in.
+		var tracking: Dictionary = undo_tracker.begin_tracking() if undo_tracker != null else {}
 		var handler_result: Variant = handler.call(params)
+		if undo_tracker != null:
+			undo_tracker.end_tracking(tracking)
 		if typeof(handler_result) == TYPE_DICTIONARY:
 			return handler_result
 		return _err_result("invalid_editor_control_result", "Editor control action returned a non-object result.")

@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+	assertPhysicalPathSync,
+	ensureDirectoryInsideRootSync,
+	readFileInsideRootSync,
+	writeFileInsideRootSync,
+} from "./physicalPath.js";
 import type { HostApproval, ProjectSummary } from "./types.js";
 
 const MAX_UNDO_FILES = 64;
@@ -27,6 +33,7 @@ export type UndoSnapshotFile = {
   sha256?: string;
   snapshot_path?: string;
   skipped_reason?: string;
+  rollback_action: "restore_snapshot" | "delete_created_file";
 };
 
 export type UndoSnapshotSummary = {
@@ -38,37 +45,37 @@ export type UndoSnapshotSummary = {
   manifest_path: string;
   requested_path_count: number;
   copied_count: number;
+  covered_count: number;
   files: UndoSnapshotFile[];
 };
 
 export async function createApprovalUndoSnapshot(project: ProjectSummary, approval: HostApproval): Promise<UndoSnapshotSummary> {
-  const requestedPaths = collectApprovalPaths(approval).slice(0, MAX_UNDO_FILES);
+	const requestedPaths = collectApprovalPaths(approval);
   if (requestedPaths.length === 0) {
     throw new Error(`approval_undo_paths_required: ${approval.approval_id}`);
   }
+	if (requestedPaths.length > MAX_UNDO_FILES) {
+		throw new Error(`approval_undo_paths_exceed_limit: ${requestedPaths.length} > ${MAX_UNDO_FILES}`);
+	}
 
   const snapshotDir = path.join(project.hostStateDir, "undo_snapshots", safeSegment(approval.approval_id));
   const filesDir = path.join(snapshotDir, "files");
-  await fs.mkdir(filesDir, { recursive: true });
+  ensureDirectoryInsideRootSync(project.projectRoot, filesDir);
 
   const files: UndoSnapshotFile[] = [];
   for (const requestedPath of requestedPaths) {
     const normalized = normalizeProjectPath(project.projectRoot, requestedPath);
     if (!normalized.ok) {
-      files.push({
-        requested_path: requestedPath,
-        existed: false,
-        copied: false,
-        skipped_reason: normalized.reason
-      });
-      continue;
+		throw new Error(`approval_undo_path_rejected: ${requestedPath}: ${normalized.reason}`);
     }
+	assertPhysicalPathSync(project.projectRoot, normalized.absolutePath, true);
 
     const file: UndoSnapshotFile = {
       requested_path: requestedPath,
       absolute_path: normalized.absolutePath,
       existed: false,
-      copied: false
+		copied: false,
+		rollback_action: "delete_created_file"
     };
     const stat = await fs.stat(normalized.absolutePath).catch(() => null);
     if (!stat) {
@@ -76,27 +83,22 @@ export async function createApprovalUndoSnapshot(project: ProjectSummary, approv
       continue;
     }
     if (!stat.isFile()) {
-      file.skipped_reason = "not_a_file";
-      files.push(file);
-      continue;
+		throw new Error(`approval_undo_not_a_file: ${requestedPath}`);
     }
     file.existed = true;
+	file.rollback_action = "restore_snapshot";
     file.byte_size = stat.size;
     if (stat.size > MAX_UNDO_FILE_BYTES) {
-      file.skipped_reason = "file_too_large";
-      files.push(file);
-      continue;
+		throw new Error(`approval_undo_file_too_large: ${requestedPath}`);
     }
     if (!SNAPSHOT_TEXT_EXTENSIONS.has(path.extname(normalized.absolutePath).toLowerCase())) {
-      file.skipped_reason = "unsupported_extension";
-      files.push(file);
-      continue;
+		throw new Error(`approval_undo_unsupported_extension: ${requestedPath}`);
     }
 
-    const bytes = await fs.readFile(normalized.absolutePath);
+	const bytes = readFileInsideRootSync(project.projectRoot, normalized.absolutePath);
     file.sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
     file.snapshot_path = path.join(filesDir, `${safeSegment(normalized.relativePath)}.snapshot`);
-    await fs.writeFile(file.snapshot_path, bytes);
+    writeFileInsideRootSync(project.projectRoot, file.snapshot_path, bytes);
     file.copied = true;
     files.push(file);
   }
@@ -110,17 +112,51 @@ export async function createApprovalUndoSnapshot(project: ProjectSummary, approv
     manifest_path: path.join(snapshotDir, "manifest.json"),
     requested_path_count: requestedPaths.length,
     copied_count: files.filter((file) => file.copied).length,
+	covered_count: files.filter(isRollbackCovered).length,
     files
   };
-  await fs.writeFile(summary.manifest_path, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+	if (summary.covered_count !== summary.requested_path_count) {
+		throw new Error(`approval_undo_incomplete: ${summary.covered_count}/${summary.requested_path_count}`);
+	}
+  writeFileInsideRootSync(project.projectRoot, summary.manifest_path, `${JSON.stringify(summary, null, 2)}\n`);
   return summary;
+}
+
+export async function verifyApprovalUndoSnapshotCurrent(summary: UndoSnapshotSummary): Promise<void> {
+	for (const file of summary.files) {
+		if (!file.absolute_path) {
+			throw new Error(`approval_undo_missing_absolute_path: ${file.requested_path}`);
+		}
+		assertPhysicalPathSync(summary.project_root, file.absolute_path, true);
+		if (file.rollback_action === "delete_created_file") {
+			const exists = await fs.stat(file.absolute_path).then(() => true).catch(() => false);
+			if (exists) {
+				throw new Error(`approval_undo_new_target_changed: ${file.requested_path}`);
+			}
+			continue;
+		}
+		const bytes = readFileInsideRootSync(summary.project_root, file.absolute_path);
+		const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+		if (sha256 !== file.sha256) {
+			throw new Error(`approval_undo_target_changed: ${file.requested_path}`);
+		}
+	}
+}
+
+function isRollbackCovered(file: UndoSnapshotFile): boolean {
+	if (file.rollback_action === "delete_created_file") {
+		return !file.existed && !file.copied;
+	}
+	return file.existed && file.copied && Boolean(file.sha256) && Boolean(file.snapshot_path);
 }
 
 function collectApprovalPaths(approval: HostApproval): string[] {
   const found = new Set<string>();
   visit(approval.file_changes, found);
   visit(approval.diff_evidence, found);
-  visit(approval.raw_params, found);
+	if (found.size === 0) {
+		visit(approval.raw_params, found);
+	}
   return [...found];
 }
 

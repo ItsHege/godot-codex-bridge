@@ -33,8 +33,8 @@ Godot Codex Bridge is local-dev software until these gates pass.
 - `godot.apply_approved_diff` is disabled unless a Host/UI-issued, short-lived,
   single-use receipt binds the exact project, operation, target, current state,
   and proposed content.
-- `godot.fix_selected_node` requires live editor permission, approval token and
-  Godot undo/redo support.
+- `godot.fix_selected_node` remains disabled pending a trusted, state-bound,
+  single-use human approval receipt; use the Godot editor's UndoRedo workflow.
 - `npm test` passes in `mcp_server`.
 - Godot headless fixture and test scene smoke commands pass.
 
@@ -48,8 +48,8 @@ Godot Codex Bridge is local-dev software until these gates pass.
 - Refresh Context writes a schema-valid context snapshot.
 - Capture Screenshot succeeds in visible editor mode or returns a structured
   failure without Godot null-parameter errors.
-- MCP addon requests prefer Host RPC when `host_config.json` is present and
-  fall back to request/response files when Host RPC is unavailable.
+- MCP addon requests use project-local request/response files; the Host HTTP
+  relay returns 503 until an authenticated MCP transport is available.
 - `npm run validate:visible-editor` passes against the fixture and writes
   `.godot\godot_codex_bridge\artifacts\visible_editor_validation.json`.
 
@@ -82,7 +82,8 @@ Godot Codex Bridge is local-dev software until these gates pass.
 ## P4 Gate
 
 3D diagnostics v1, export readiness checks, explicit-file undo snapshots,
-visual regression metadata/pixel checks, bounded performance timelines, bounded
-scene generation, approved diff apply and narrow selected-node fixes are allowed
-as local safety tools. Real export execution, signing, marketplace packaging
-and automatic broad mutation still require additional validation gates.
+visual regression metadata/pixel checks, bounded performance timelines and
+bounded scene planning are allowed as local safety tools. Approved diff apply
+and selected-node fixes remain disabled pending trusted one-use approval
+receipts. Real export execution, signing, marketplace packaging and automatic
+broad mutation still require additional validation gates.

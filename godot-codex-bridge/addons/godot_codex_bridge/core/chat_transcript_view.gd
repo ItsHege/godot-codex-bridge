@@ -6,6 +6,7 @@ const ChatTranscriptBatchModel := preload("chat_transcript_batch_model.gd")
 const ChatDiffModel := preload("chat_diff_model.gd")
 const ChatDiffView := preload("chat_diff_view.gd")
 const ChatThemeModel := preload("chat_theme_model.gd")
+const DockStyle := preload("dock_style.gd")
 
 const COPY_ICON_TEXT := "⧉"
 const COPY_BUTTON_SIZE := Vector2(20, 20)
@@ -36,6 +37,8 @@ var _diff_panel: VBoxContainer
 var _diff_controls := {}
 var _diff_state := {}
 var _palette := ChatThemeModel.default_palette()
+## Editor code font for inline/fenced code in messages (null when headless).
+var _code_font: Font
 var _limits := {
 	"max_message_chars": 65536,
 	"collapse_chars": 1200,
@@ -78,7 +81,9 @@ func setup(message_list: VBoxContainer, bottom_spacer: Control, scroll_callback:
 	_scroll_callback = scroll_callback
 	_detail_callback = detail_callback
 	for key in limits.keys():
-		if key == "palette" and limits.get(key) is Dictionary:
+		if key == "code_font":
+			_code_font = limits.get(key) as Font if limits.get(key) is Font else null
+		elif key == "palette" and limits.get(key) is Dictionary:
 			_palette = ChatThemeModel.palette_values(limits.get(key) as Dictionary)
 		else:
 			_limits[key] = limits.get(key)
@@ -139,18 +144,76 @@ func append_status_message(text: String, now_msec := 0) -> RichTextLabel:
 		set_bubble_text(_last_status_label, repeated_text)
 		_last_status_msec = now_msec
 		return _last_status_label
-	var style := ChatThemeModel.bubble_style("status", _palette)
-	var label := append_bubble(
-		"Status",
-		trimmed,
-		style.get("background", Color(0.16, 0.16, 0.16)),
-		style.get("accent", Color(0.28, 0.28, 0.28))
-	)
+	var label := append_status_row(trimmed)
 	_last_status_text = trimmed
 	_last_status_label = label
 	_last_status_msec = now_msec
 	_last_status_repeat_count = 1
 	return label
+
+
+## Status/system line: muted text without a card, selectable, copy via the
+## right-click menu. Kept one per message so coalescing still works.
+func append_status_row(text: String) -> RichTextLabel:
+	if _message_list == null:
+		return null
+	var row := MarginContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("margin_left", DockStyle.SPACE_S + DockStyle.ACCENT_BAR)
+	row.add_theme_constant_override("margin_right", DockStyle.SPACE_S)
+	row.set_meta("chat_status_row", true)
+	var body := _message_body()
+	body.add_theme_color_override("default_color", _palette.get("muted_font", Color(0.62, 0.62, 0.62)))
+	body.add_theme_color_override("font_color", _palette.get("muted_font", Color(0.62, 0.62, 0.62)))
+	body.set_meta("chat_author", "Status")
+	body.set_meta("chat_no_collapse", true)
+	body.tooltip_text = "Status"
+	row.add_child(body)
+	set_bubble_text(body, text)
+	append_panel(row)
+	return body
+
+
+func _message_body() -> RichTextLabel:
+	var body := RichTextLabel.new()
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.fit_content = true
+	body.scroll_active = false
+	body.selection_enabled = true
+	body.context_menu_enabled = true
+	body.bbcode_enabled = true
+	body.add_theme_constant_override("line_separation", 2)
+	# The editor theme gives RichTextLabel its own padded panel; the card
+	# already provides the background, so drop the inner box.
+	body.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	body.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	if _code_font != null:
+		body.add_theme_font_override("mono_font", _code_font)
+	return body
+
+
+## Copy icon overlaid at the top-right of a card, visible while hovered or
+## focused. `hover_root` is the card whose hover reveals it.
+func _attach_hover_copy(hover_root: Control, overlay: Container, copy_button: Button) -> void:
+	copy_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	copy_button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	copy_button.modulate.a = 0.0
+	overlay.add_child(copy_button)
+	var reveal := func() -> void:
+		if is_instance_valid(copy_button):
+			copy_button.modulate.a = 1.0
+	var conceal := func() -> void:
+		if not is_instance_valid(copy_button) or not is_instance_valid(hover_root) or copy_button.has_focus():
+			return
+		if hover_root.is_inside_tree() and hover_root.get_global_rect().has_point(hover_root.get_global_mouse_position()):
+			return
+		copy_button.modulate.a = 0.0
+	for node in [hover_root, copy_button]:
+		(node as Control).mouse_entered.connect(reveal)
+		(node as Control).mouse_exited.connect(conceal)
+	copy_button.focus_entered.connect(reveal)
+	copy_button.focus_exited.connect(conceal)
 
 
 func _is_routine_diagnostic(text: String) -> bool:
@@ -212,63 +275,38 @@ func append_bubble(author: String, text: String, background: Color, accent: Colo
 	if _message_list == null:
 		return null
 
+	# Compact card: role shown as the colored left bar (name in the tooltip),
+	# copy icon overlaid top-right on hover, no header row.
 	var panel := PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var style := StyleBoxFlat.new()
-	style.bg_color = background
-	style.border_color = accent
-	style.border_width_left = 2
-	style.corner_radius_top_left = 6
-	style.corner_radius_top_right = 6
-	style.corner_radius_bottom_left = 6
-	style.corner_radius_bottom_right = 6
-	panel.add_theme_stylebox_override("panel", style)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	panel.add_child(margin)
+	panel.tooltip_text = author
+	panel.add_theme_stylebox_override("panel", DockStyle.card_box(background, accent, DockStyle.ACCENT_BAR, Vector2(DockStyle.SPACE_M, DockStyle.SPACE_S + 2)))
 
 	var content := VBoxContainer.new()
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 4)
-	margin.add_child(content)
+	content.add_theme_constant_override("separation", 2)
+	panel.add_child(content)
 
-	var header_row := HBoxContainer.new()
-	header_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header_row.add_theme_constant_override("separation", 6)
-	content.add_child(header_row)
+	var overlay := MarginContainer.new()
+	overlay.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(overlay)
 
-	var header := Label.new()
-	header.text = author
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_theme_color_override("font_color", accent)
-	header.add_theme_font_size_override("font_size", 11)
-	header_row.add_child(header)
+	var body := _message_body()
+	body.add_theme_color_override("font_color", _palette.get("body_font", Color(0.86, 0.86, 0.86)))
+	overlay.add_child(body)
+
+	var copy_button := create_copy_button("Copy the full message text to clipboard.")
+	_attach_hover_copy(panel, overlay, copy_button)
 
 	var collapse_button := Button.new()
 	collapse_button.text = "More"
 	collapse_button.tooltip_text = "Expand or collapse this message."
 	collapse_button.focus_mode = Control.FOCUS_ALL
 	collapse_button.visible = false
-	collapse_button.custom_minimum_size = Vector2(54, 24)
-	header_row.add_child(collapse_button)
-
-	var copy_button := create_copy_button("Copy the full message text to clipboard.")
-	header_row.add_child(copy_button)
-
-	var body := RichTextLabel.new()
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.fit_content = true
-	body.scroll_active = false
-	body.selection_enabled = true
-	body.bbcode_enabled = true
-	body.add_theme_color_override("font_color", _palette.get("body_font", Color(0.86, 0.86, 0.86)))
-	content.add_child(body)
+	collapse_button.flat = true
+	collapse_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	collapse_button.add_theme_font_size_override("font_size", 11)
+	content.add_child(collapse_button)
 
 	body.set_meta("chat_author", author)
 	body.set_meta("chat_collapse_button", collapse_button)
@@ -637,55 +675,37 @@ func append_work_batch(toggle_callback: Callable = Callable()) -> Dictionary:
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.set_meta("chat_work_batch", true)
 
-	var style := StyleBoxFlat.new()
 	var work_style := ChatThemeModel.bubble_style("work", _palette)
-	style.bg_color = work_style.get("background", Color(0.10, 0.10, 0.10))
-	style.border_color = work_style.get("accent", Color(0.42, 0.42, 0.42))
-	style.border_width_left = 2
-	style.corner_radius_top_left = 6
-	style.corner_radius_top_right = 6
-	style.corner_radius_bottom_left = 6
-	style.corner_radius_bottom_right = 6
-	panel.add_theme_stylebox_override("panel", style)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	panel.add_child(margin)
+	panel.tooltip_text = "Work notes"
+	panel.add_theme_stylebox_override("panel", DockStyle.card_box(work_style.get("background", Color(0.10, 0.10, 0.10)), work_style.get("accent", Color(0.42, 0.42, 0.42)), DockStyle.ACCENT_BAR, Vector2(DockStyle.SPACE_S, 1)))
 
 	var content := VBoxContainer.new()
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 6)
-	margin.add_child(content)
+	content.add_theme_constant_override("separation", 2)
+	panel.add_child(content)
 
-	var header_row := HBoxContainer.new()
-	header_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header_row.add_theme_constant_override("separation", 6)
-	content.add_child(header_row)
-
-	var header := Label.new()
-	header.text = "Work notes"
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_theme_color_override("font_color", _palette.get("muted_font", Color(0.62, 0.62, 0.62)))
-	header.add_theme_font_size_override("font_size", 11)
-	header_row.add_child(header)
-
-	var copy_button := create_copy_button("Copy all work notes to clipboard.")
-	header_row.add_child(copy_button)
-
-	var summary_label := Label.new()
-	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	summary_label.add_theme_color_override("font_color", _palette.get("body_font", Color(0.78, 0.78, 0.78)))
-	content.add_child(summary_label)
+	var overlay := MarginContainer.new()
+	overlay.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(overlay)
 
 	var toggle_button := Button.new()
-	toggle_button.text = "Show notes"
+	toggle_button.text = work_toggle_text(false, 0)
 	toggle_button.tooltip_text = "Show or hide intermediate Codex work/progress notes."
 	toggle_button.focus_mode = Control.FOCUS_ALL
+	toggle_button.flat = true
+	toggle_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	toggle_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_child(toggle_button)
+	toggle_button.add_theme_color_override("font_color", _palette.get("muted_font", Color(0.62, 0.62, 0.62)))
+	overlay.add_child(toggle_button)
+
+	var copy_button := create_copy_button("Copy all work notes to clipboard.")
+	_attach_hover_copy(panel, overlay, copy_button)
+
+	# Kept for callers/tests; the one-line toggle already carries the count.
+	var summary_label := Label.new()
+	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	summary_label.visible = false
+	content.add_child(summary_label)
 
 	var body_label := Label.new()
 	body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -727,28 +747,13 @@ func append_diff_batch(toggle_callback: Callable = Callable()) -> Dictionary:
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.set_meta("chat_diff_preview", true)
 
-	var style := StyleBoxFlat.new()
 	var diff_style := ChatThemeModel.bubble_style("diff", _palette)
-	style.bg_color = diff_style.get("background", Color(0.13, 0.13, 0.10))
-	style.border_color = diff_style.get("accent", Color(0.70, 0.58, 0.26))
-	style.border_width_left = 2
-	style.corner_radius_top_left = 6
-	style.corner_radius_top_right = 6
-	style.corner_radius_bottom_left = 6
-	style.corner_radius_bottom_right = 6
-	panel.add_theme_stylebox_override("panel", style)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	panel.add_child(margin)
+	panel.add_theme_stylebox_override("panel", DockStyle.card_box(diff_style.get("background", Color(0.13, 0.13, 0.10)), diff_style.get("accent", Color(0.70, 0.58, 0.26)), DockStyle.ACCENT_BAR, Vector2(DockStyle.SPACE_M, DockStyle.SPACE_S + 2)))
 
 	var content := VBoxContainer.new()
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 6)
-	margin.add_child(content)
+	content.add_theme_constant_override("separation", DockStyle.SPACE_S)
+	panel.add_child(content)
 
 	var header_row := HBoxContainer.new()
 	header_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -819,7 +824,7 @@ func update_work_batch(controls: Dictionary, updates: int, text: String, visible
 		)
 	var toggle_button: Variant = controls.get("toggle_button", null)
 	if toggle_button is Button and is_instance_valid(toggle_button):
-		(toggle_button as Button).text = ChatTranscriptModel.work_batch_toggle_text(visible, updates)
+		(toggle_button as Button).text = work_toggle_text(visible, updates)
 	var body_label: Variant = controls.get("body_label", null)
 	if body_label is Label and is_instance_valid(body_label):
 		(body_label as Label).text = full_text
@@ -904,13 +909,17 @@ func update_diff_batch(controls: Dictionary, updates: int, diff_text: String, fi
 	}
 
 
+static func work_toggle_text(visible: bool, updates: int) -> String:
+	return ("▾ " if visible else "▸ ") + "Work notes (" + str(maxi(updates, 0)) + ")"
+
+
 func set_work_batch_visible(controls: Dictionary, updates: int, visible: bool) -> void:
 	var body_label: Variant = controls.get("body_label", null)
 	if body_label is Label and is_instance_valid(body_label):
 		(body_label as Label).visible = visible
 	var toggle_button: Variant = controls.get("toggle_button", null)
 	if toggle_button is Button and is_instance_valid(toggle_button):
-		(toggle_button as Button).text = ChatTranscriptModel.work_batch_toggle_text(visible, updates)
+		(toggle_button as Button).text = work_toggle_text(visible, updates)
 	var panel: Variant = controls.get("panel", null)
 	if panel is Control and is_instance_valid(panel):
 		(panel as Control).set_meta("chat_work_visible", visible)
@@ -961,11 +970,11 @@ func set_bubble_text(body: RichTextLabel, text: String) -> void:
 	var full_text := ChatTranscriptModel.truncate_text(text, int(_limits.get("max_message_chars", 65536)))
 	body.set_meta("chat_full_text", full_text)
 	var force_collapsed := bool(body.get_meta("chat_force_collapsed", false))
-	var can_collapse := force_collapsed or ChatTranscriptModel.should_collapse_text(
+	var can_collapse := not bool(body.get_meta("chat_no_collapse", false)) and (force_collapsed or ChatTranscriptModel.should_collapse_text(
 		full_text,
 		int(_limits.get("collapse_chars", 1200)),
 		int(_limits.get("collapse_lines", 14))
-	)
+	))
 	var user_toggled := bool(body.get_meta("chat_user_toggled", false))
 	var collapsed := bool(body.get_meta("chat_collapsed", false))
 	if not can_collapse:
@@ -973,7 +982,7 @@ func set_bubble_text(body: RichTextLabel, text: String) -> void:
 	elif not user_toggled:
 		collapsed = true
 	body.set_meta("chat_collapsed", collapsed)
-	var collapse_button: Variant = body.get_meta("chat_collapse_button", null)
+	var collapse_button: Variant = body.get_meta("chat_collapse_button") if body.has_meta("chat_collapse_button") else null
 	if collapse_button is Button:
 		(collapse_button as Button).visible = can_collapse
 		(collapse_button as Button).text = "More" if collapsed else "Less"
@@ -996,7 +1005,7 @@ func toggle_message_collapse(body: RichTextLabel) -> void:
 	var collapsed := not bool(body.get_meta("chat_collapsed", true))
 	body.set_meta("chat_user_toggled", true)
 	body.set_meta("chat_collapsed", collapsed)
-	var collapse_button: Variant = body.get_meta("chat_collapse_button", null)
+	var collapse_button: Variant = body.get_meta("chat_collapse_button") if body.has_meta("chat_collapse_button") else null
 	if collapse_button is Button:
 		(collapse_button as Button).text = "More" if collapsed else "Less"
 	var rendered := ChatTranscriptModel.safe_rich_text(_body_display_text(full_text, collapsed, force_collapsed))
@@ -1024,6 +1033,19 @@ func _append_assistant_bubble(phase: String) -> RichTextLabel:
 		bubble_style.get("accent", style.get("accent", Color(0.25, 0.25, 0.25))),
 		bool(style.get("force_collapsed", false))
 	)
+
+
+## True when `body` belongs to the newest transcript entry.
+func is_last_message(body: Control) -> bool:
+	if _message_list == null or body == null or not is_instance_valid(body):
+		return false
+	var index := _message_list.get_child_count() - 1
+	if index >= 0 and _message_list.get_child(index) == _bottom_spacer:
+		index -= 1
+	if index < 0:
+		return false
+	var last := _message_list.get_child(index)
+	return last == body or last.is_ancestor_of(body)
 
 
 func message_count() -> int:

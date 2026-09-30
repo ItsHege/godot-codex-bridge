@@ -3,18 +3,36 @@ import test from "node:test";
 import {
   AppServerRuntime,
   appServerListenUrl,
+  codexChildEnvironment,
   appServerThreadStartParams,
   appServerTurnStartParams,
   diffTextFromFileUpdateChanges,
   fileChangesFromFileUpdateChanges,
   normalizeRuntimeReasoningEffort,
-  responseForApproval
+  bridgeMcpOverrideArgs,
+  responseForApproval,
+  terminateProcessTree
 } from "../src/appServerRuntime.js";
 import type { HostEvent } from "../src/types.js";
 
 test("app-server URLs bracket IPv6 loopback for both listener and client", () => {
   assert.equal(appServerListenUrl("::1", 49391), "ws://[::1]:49391");
   assert.equal(appServerListenUrl("127.0.0.1", 49391), "ws://127.0.0.1:49391");
+});
+
+test("Codex child process does not inherit Host pairing or launch secrets", () => {
+  const parent = {
+    PATH: "trusted-path",
+    GODOT_CODEX_HOST_PAIR_SECRET: "a".repeat(64),
+    GODOT_CODEX_HOST_LAUNCH_NONCE: "b".repeat(64),
+    godot_codex_host_pair_secret: "c".repeat(64),
+  };
+  const child = codexChildEnvironment(parent);
+  assert.equal(child.PATH, "trusted-path");
+  assert.equal(child.GODOT_CODEX_HOST_PAIR_SECRET, undefined);
+  assert.equal(child.GODOT_CODEX_HOST_LAUNCH_NONCE, undefined);
+  assert.equal(child.godot_codex_host_pair_secret, undefined);
+  assert.equal(parent.GODOT_CODEX_HOST_PAIR_SECRET, "a".repeat(64));
 });
 
 test("reasoning effort identifiers accept bounded server values and reject malformed input", () => {
@@ -163,7 +181,11 @@ test("unsupported network, terminal input and environment approvals are declined
 });
 
 test("ordinary command approvals remain available for old and current command schemas", async () => {
-  for (const extra of [{}, { kind: "command", environmentId: null, networkApprovalContext: null }]) {
+  for (const extra of [
+    {},
+    { kind: "command", environmentId: null, networkApprovalContext: null },
+    { kind: "command", environmentId: null, proposedExecpolicyAmendment: ["echo", "test"] },
+  ]) {
     const responses: unknown[] = [];
     const events = await collectApprovalEvents([{
       id: 9, method: "item/commandExecution/requestApproval",
@@ -474,11 +496,34 @@ test("app-server nonretryable errors still terminate the active turn", async () 
   assert.equal(events[1].params.message, "Authentication failed");
 });
 
+test("Codex shutdown stops the whole Windows process tree and falls back to kill", () => {
+  const calls: Array<{ file: string; args: string[] }> = [];
+  let killed = 0;
+  const proc = { pid: 4242, kill: () => { killed += 1; return true; } };
+  terminateProcessTree(proc, "win32", (file, args) => { calls.push({ file, args }); return { status: 0 }; });
+  assert.equal(killed, 0);
+  assert.match(calls[0]!.file, /System32[\\/]taskkill\.exe$/i);
+  assert.deepEqual(calls[0]!.args, ["/PID", "4242", "/T", "/F"]);
+
+  terminateProcessTree(proc, "win32", () => ({ status: 128 }));
+  assert.equal(killed, 1);
+  terminateProcessTree(proc, "linux", () => { throw new Error("taskkill must not run off Windows"); });
+  assert.equal(killed, 2);
+});
+
 test("app-server command approval maps Godot approve to one-shot accept", () => {
+  const params = { threadId: "thread", turnId: "turn", itemId: "item", command: "echo test" };
   assert.deepEqual(
-    responseForApproval("item/commandExecution/requestApproval", "approve"),
+    responseForApproval("item/commandExecution/requestApproval", "approve", params),
     { decision: "accept" }
   );
+  // An offered exec-policy amendment is never accepted along with the command.
+  for (const decision of ["approve", "approve_session"] as const) {
+    assert.deepEqual(
+      responseForApproval("item/commandExecution/requestApproval", decision, { ...params, proposedExecpolicyAmendment: ["echo", "test"] }),
+      { decision: decision === "approve" ? "accept" : "acceptForSession" }
+    );
+  }
   assert.deepEqual(
     responseForApproval("item/commandExecution/requestApproval", "reject"),
     { decision: "decline" }
@@ -489,35 +534,38 @@ test("app-server command approval maps Godot approve to one-shot accept", () => 
   );
 });
 
-test("app-server approval maps Godot approve_session to session decisions", () => {
+test("app-server approval maps command approve_session and rejects broader session scopes", () => {
+  const commandParams = { threadId: "thread", turnId: "turn", itemId: "item", command: "echo test" };
+  const legacyParams = { conversationId: "thread", callId: "call", command: ["echo", "test"] };
   assert.deepEqual(
-    responseForApproval("item/commandExecution/requestApproval", "approve_session"),
+    responseForApproval("item/commandExecution/requestApproval", "approve_session", commandParams),
     { decision: "acceptForSession" }
   );
-  assert.deepEqual(
-    responseForApproval("item/fileChange/requestApproval", "approve_session"),
-    { decision: "acceptForSession" }
+  assert.throws(
+    () => responseForApproval("item/fileChange/requestApproval", "approve_session", { threadId: "thread", turnId: "turn", itemId: "item" }),
+    /approval_session_scope_not_allowed/
   );
   assert.deepEqual(
-    responseForApproval("execCommandApproval", "approve_session"),
+    responseForApproval("execCommandApproval", "approve_session", legacyParams),
     { decision: "approved_for_session" }
   );
-  assert.deepEqual(
-    responseForApproval("applyPatchApproval", "approve_session"),
-    { decision: "approved_for_session" }
+  assert.throws(
+    () => responseForApproval("applyPatchApproval", "approve_session", { conversationId: "thread", callId: "call" }),
+    /approval_session_scope_not_allowed/
   );
 });
 
-test("app-server elicitation ignores session approval and accepts once", () => {
-  assert.deepEqual(
-    responseForApproval("mcpServer/elicitation/request", "approve_session", {}, ""),
-    { action: "accept", content: {}, _meta: null }
+test("app-server rejects session approval for elicitation", () => {
+  assert.throws(
+    () => responseForApproval("mcpServer/elicitation/request", "approve_session", {}, ""),
+    /approval_session_scope_not_allowed/
   );
 });
 
 test("legacy exec command approval maps Godot approve to approved", () => {
+  const params = { conversationId: "thread", callId: "call", command: ["echo", "test"] };
   assert.deepEqual(
-    responseForApproval("execCommandApproval", "approve"),
+    responseForApproval("execCommandApproval", "approve", params),
     { decision: "approved" }
   );
   assert.deepEqual(
@@ -611,20 +659,20 @@ test("app-server annotation turn params do not embed PNG bytes in JSON", () => {
   assert.doesNotMatch(serialized, /rawImageBytes|annotatedImageBytes|bytesBase64|image_bytes/i);
 });
 
-test("app-server permission approval grants requested permissions only when accepted", () => {
+test("app-server permission approval never grants requested permissions", () => {
   const rawParams = {
     permissions: {
       fileSystem: { writableRoots: ["C:\\Project"] },
       network: null,
     },
   };
-  assert.deepEqual(
-    responseForApproval("item/permissions/requestApproval", "approve_session", rawParams),
-    {
-      permissions: { fileSystem: { writableRoots: ["C:\\Project"] } },
-      scope: "session",
-      strictAutoReview: false,
-    },
+  assert.throws(
+    () => responseForApproval("item/permissions/requestApproval", "approve", rawParams),
+    /unsupported_approval_scope/,
+  );
+  assert.throws(
+    () => responseForApproval("item/permissions/requestApproval", "approve_session", rawParams),
+    /unsupported_approval_scope/,
   );
   assert.deepEqual(
     responseForApproval("item/permissions/requestApproval", "reject", rawParams),
@@ -652,4 +700,20 @@ test("app-server normalizes file change patch updates for Godot chat diff cards"
     type: "add",
     unified_diff: "@@\n+[node name=\"Main\" type=\"Node3D\"]",
   });
+});
+
+test("Codex launch binds the godot_codex_bridge MCP server to the attached project", () => {
+  const args = bridgeMcpOverrideArgs(
+    { projectRoot: "C:\\Games\\Cult \"A\"", bridgeDir: "C:\\Games\\Cult \"A\"\\.godot\\godot_codex_bridge" },
+    "C:\\Bridge\\mcp_server\\dist\\src\\index.js",
+    "C:\\Program Files\\nodejs\\node.exe",
+    () => true,
+  );
+  assert.equal(args[0], "-c");
+  assert.equal(
+    args[1],
+    'mcp_servers.godot_codex_bridge={command="C:\\\\Program Files\\\\nodejs\\\\node.exe",args=["C:\\\\Bridge\\\\mcp_server\\\\dist\\\\src\\\\index.js"],env={GODOT_CODEX_BRIDGE_PROJECT_ROOT="C:\\\\Games\\\\Cult \\"A\\"",GODOT_CODEX_BRIDGE_DIR="C:\\\\Games\\\\Cult \\"A\\"\\\\.godot\\\\godot_codex_bridge"}}',
+  );
+  assert.deepEqual(bridgeMcpOverrideArgs(null), []);
+  assert.deepEqual(bridgeMcpOverrideArgs({ projectRoot: "C:\\p", bridgeDir: "C:\\p\\b" }, "C:\\missing.js", "node.exe", () => false), []);
 });

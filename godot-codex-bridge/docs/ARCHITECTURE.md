@@ -14,14 +14,15 @@ previews.
 ```text
 Codex / MCP client
   -> MCP stdio server
-  -> Codex Host /bridge/request when configured
-  -> Godot addon WebSocket
+  -> .godot\godot_codex_bridge\requests
   -> Godot Editor addon
   -> official Godot editor APIs
+  -> .godot\godot_codex_bridge\responses
 ```
 
-If the local Codex Host RPC path is not configured or unavailable, the MCP
-server falls back to the project-local bridge dir:
+The Host `/bridge/request` HTTP path is disabled until a separately
+authenticated MCP transport exists. The MCP server uses the project-local
+bridge dir:
 
 ```text
 MCP stdio server
@@ -40,11 +41,9 @@ The bridge dir is generated evidence/cache. It is local to the Godot project and
 should hold context snapshots, fallback request/response records, command logs,
 and screenshot artifacts.
 
-MCP-to-addon requests should use Codex Host RPC as the primary route whenever a
-local `addons\godot_codex_bridge\host_config.json` is installed. The MCP server
-derives `/bridge/request` from that file, accepts only localhost targets, and
-falls back to file polling only when the host RPC route is missing or
-unavailable.
+The MCP server may derive a loopback Host URL from
+`addons\godot_codex_bridge\host_config.json`, but the current Host returns 503
+for HTTP forwarding. File polling serves addon requests in this release.
 
 Every addon-backed MCP request records transport evidence. Responses include
 `transport_attempts` with per-route status and latency; file fallback responses

@@ -1,9 +1,10 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 
+import { ensureDirectoryInsideRootSync, writeFileInsideRootSync } from "./physicalPath.js";
 import type { ToolEnvelope } from "./types.js";
 
 export async function createDiagnosticSnapshot(
+  projectRoot: string,
   bridgeDir: string,
   diagnostics: ToolEnvelope,
   label?: string,
@@ -14,11 +15,11 @@ export async function createDiagnosticSnapshot(
 
   const snapshotId = snapshotIdFor(label);
   const snapshotRoot = path.join(bridgeDir, "artifacts", "diagnostic_snapshots", snapshotId);
-  await fs.mkdir(snapshotRoot, { recursive: true });
+  ensureDirectoryInsideRootSync(projectRoot, snapshotRoot);
 
   const diagnosticPath = path.join(snapshotRoot, "inspect_3d_scene.json");
   const manifestPath = path.join(snapshotRoot, "manifest.json");
-  await fs.writeFile(diagnosticPath, `${JSON.stringify(diagnostics, null, 2)}\n`, "utf8");
+  writeFileInsideRootSync(projectRoot, diagnosticPath, `${JSON.stringify(diagnostics, null, 2)}\n`);
 
   const manifest = {
     status: "ok" as const,
@@ -34,7 +35,7 @@ export async function createDiagnosticSnapshot(
       "Collision and navigation debug layers are derived from the latest context snapshot.",
     ],
   };
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeFileInsideRootSync(projectRoot, manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   return {
     ...manifest,

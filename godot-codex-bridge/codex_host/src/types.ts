@@ -46,6 +46,7 @@ export type HostEventMethod =
   | "approval.requested"
   | "approval.invalidated"
   | "approval.resolved"
+  | "approval.auto_approved"
   | "approval.expired"
   | "background.updated"
   | "runtime.warning"
@@ -177,6 +178,7 @@ export type HostStatus = {
   threadId?: string;
   turnId?: string;
   pendingApprovals: number;
+  sessionAllowedTools?: string[];
   backgroundTasks: number;
   eventQueueDepth: number;
   updatedAt: string;
@@ -270,6 +272,8 @@ export type ApprovalRespondParams = {
   diff_hash?: string;
   decision: "approve" | "approve_session" | "reject" | "revise";
   note?: string;
+  /** Approve and auto-approve later calls of this read-only Bridge tool this Host session. */
+  remember_for_session?: boolean;
 };
 
 export type RuntimeApprovalKind =

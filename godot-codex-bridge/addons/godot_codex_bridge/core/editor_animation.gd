@@ -6,7 +6,13 @@ const BridgeContext := preload("bridge_context.gd")
 const BridgeLimits := preload("bridge_limits.gd")
 const EditorPathGuard := preload("editor_path_guard.gd")
 
+const MAX_PREVIEW_BACKUP_ENTRIES := 512
+
 var _context: BridgeContext
+## Original property values captured before an animation preview touched them,
+## keyed by AnimationPlayer instance id: {player, entries: [{object, property,
+## value}], keys: {}}. Previews run outside UndoRedo, so stop restores these.
+var _preview_backups := {}
 
 
 func _init(context: BridgeContext = null) -> void:
@@ -96,6 +102,9 @@ func preview_animation(params: Dictionary) -> Dictionary:
 	var mode := str(params.get("mode", "seek")).strip_edges().to_lower()
 	var position := clampf(float(params.get("position", 0.0)), 0.0, max(0.0, float(animation.length)))
 	var speed := clampf(float(params.get("speed", 1.0)), -8.0, 8.0)
+	if not mode in ["seek", "play", "pause"]:
+		return _err("invalid_animation_preview_mode", "mode must be seek, play or pause.")
+	var backup := _capture_preview_backup(player, animation)
 	if mode == "seek":
 		player.play(StringName(animation_name), -1.0, 0.0, false)
 		player.seek(position, true, true)
@@ -106,13 +115,16 @@ func preview_animation(params: Dictionary) -> Dictionary:
 			player.call("advance", 0.0)
 	elif mode == "pause":
 		player.pause()
-	else:
-		return _err("invalid_animation_preview_mode", "mode must be seek, play or pause.")
+	_record_previewed_values(backup, mode)
 	var snapshot := _refresh("editor_control:preview_animation")
 	var data := {
 		"changed": false,
 		"auto_saved": false,
 		"preview_only": true,
+		"undo_redo_action": false,
+		"pose_backup_entries": (backup.get("entries", []) as Array).size(),
+		"pose_backup_truncated": bool(backup.get("truncated", false)),
+		"agent_guidance": "The preview pose is applied outside UndoRedo. Call stop_animation_preview before saving; it restores the original pose.",
 		"player": AnimationModel.node_ref_payload(player, scene_root),
 		"animation_name": animation_name,
 		"mode": mode,
@@ -135,14 +147,39 @@ func stop_animation_preview(params: Dictionary) -> Dictionary:
 	var player: AnimationPlayer = player_result.get("player", null)
 	var scene_root: Node = player_result.get("scene_root", null)
 	var keep_state := bool(params.get("keep_state", params.get("keepState", true)))
+	# keep_state only controls the player's own stop(); the edited pose is
+	# restored unless keep_pose is explicitly requested.
+	var keep_pose := bool(params.get("keep_pose", params.get("keepPose", false)))
+	_purge_stale_backups()
+	var had_backup := _preview_backups.has(player.get_instance_id())
+	var playback_unverifiable := had_backup and str((_preview_backups[player.get_instance_id()] as Dictionary).get("last_mode", "")) == "play"
+	if playback_unverifiable:
+		# Playback kept writing the pose, so the current values are what the
+		# animation wrote last; edits made during playback cannot be told apart.
+		_record_previewed_values(_preview_backups[player.get_instance_id()], "play", true)
 	player.stop(keep_state)
+	var restore := {"restored": 0, "failed": 0, "conflicts": 0, "had_backup": had_backup}
+	if keep_pose:
+		_preview_backups.erase(player.get_instance_id())
+	else:
+		restore = _restore_preview_backup(player)
 	var snapshot := _refresh("editor_control:stop_animation_preview")
 	var data := {
-		"changed": false,
+		# A kept preview pose is an unsaved scene change made outside UndoRedo.
+		"changed": keep_pose and had_backup,
 		"auto_saved": false,
 		"preview_only": true,
+		"undo_redo_action": false,
 		"player": AnimationModel.node_ref_payload(player, scene_root),
 		"keep_state": keep_state,
+		"keep_pose": keep_pose,
+		"pose_restored": not keep_pose and bool(restore.get("had_backup", false)) and int(restore.get("failed", 0)) == 0 and int(restore.get("conflicts", 0)) == 0,
+		"restored_property_count": int(restore.get("restored", 0)),
+		"restore_failed_count": int(restore.get("failed", 0)),
+		# Properties changed after the preview wrote them (user or UndoRedo edit)
+		# are left alone rather than overwritten outside UndoRedo.
+		"restore_conflict_count": int(restore.get("conflicts", 0)),
+		"conflict_detection": "playback_unverifiable" if playback_unverifiable else "exact",
 		"is_playing": player.is_playing(),
 		"snapshot_refreshed": true,
 		"generated_at": snapshot.get("generated_at", ""),
@@ -219,6 +256,129 @@ func create_animation_clip(params: Dictionary) -> Dictionary:
 	}
 	_log("editor_animation_clip_created", data)
 	return _ok(data)
+
+
+func _capture_preview_backup(player: AnimationPlayer, animation: Animation) -> Dictionary:
+	_purge_stale_backups()
+	var key := player.get_instance_id()
+	var backup: Dictionary = _preview_backups.get(key, {"player": weakref(player), "entries": [], "keys": {}, "truncated": false})
+	_preview_backups[key] = backup
+	var touched: Array = []
+	backup["touched"] = touched
+	var root := player.get_node_or_null(player.root_node)
+	if root == null or animation == null:
+		return backup
+	var entries: Array = backup.get("entries", [])
+	var keys: Dictionary = backup.get("keys", {})
+	for track in range(animation.get_track_count()):
+		var target := preview_track_target(root, animation.track_get_type(track), animation.track_get_path(track))
+		if target.is_empty():
+			continue
+		var object: Object = target.get("object")
+		var property := str(target.get("property", ""))
+		var entry_key := str(object.get_instance_id()) + ":" + property
+		if keys.has(entry_key):
+			if not touched.has(keys[entry_key]):
+				touched.append(keys[entry_key])
+			continue
+		if entries.size() >= MAX_PREVIEW_BACKUP_ENTRIES:
+			backup["truncated"] = true
+			break
+		keys[entry_key] = entries.size()
+		touched.append(entries.size())
+		entries.append({"object": weakref(object), "property": property, "value": _copy_value(object.get_indexed(NodePath(property)))})
+	return backup
+
+
+## Remembers what the preview wrote to the properties this animation touched,
+## so stop can tell a later user/UndoRedo edit apart from the preview pose.
+func _record_previewed_values(backup: Dictionary, mode: String, all_entries := false) -> void:
+	backup["last_mode"] = mode
+	var entries: Array = backup.get("entries", [])
+	var indices: Array = range(entries.size()) if all_entries else backup.get("touched", [])
+	for index in indices:
+		var entry: Dictionary = entries[int(index)]
+		var object: Object = (entry.get("object") as WeakRef).get_ref()
+		if object != null:
+			entry["previewed"] = _copy_value(object.get_indexed(NodePath(str(entry.get("property")))))
+			entry["has_previewed"] = true
+
+
+func _purge_stale_backups() -> void:
+	for key in _preview_backups.keys():
+		var backup: Dictionary = _preview_backups[key]
+		if (backup.get("player") as WeakRef).get_ref() == null:
+			_preview_backups.erase(key)
+
+
+static func _copy_value(value: Variant) -> Variant:
+	if typeof(value) == TYPE_ARRAY or typeof(value) == TYPE_DICTIONARY:
+		return value.duplicate(true)
+	return value
+
+
+static func same_value(a: Variant, b: Variant) -> bool:
+	return typeof(a) == typeof(b) and a == b
+
+
+func _restore_preview_backup(player: AnimationPlayer) -> Dictionary:
+	var key := player.get_instance_id()
+	if not _preview_backups.has(key):
+		return {"restored": 0, "failed": 0, "had_backup": false}
+	var backup: Dictionary = _preview_backups[key]
+	_preview_backups.erase(key)
+	var restored := 0
+	var failed := 0
+	var conflicts := 0
+	var entries: Array = backup.get("entries", [])
+	# Restore in reverse capture order so the earliest original value wins.
+	for index in range(entries.size() - 1, -1, -1):
+		var entry: Dictionary = entries[index]
+		var object: Object = (entry.get("object") as WeakRef).get_ref()
+		if object == null:
+			failed += 1
+			continue
+		var property := NodePath(str(entry.get("property")))
+		if bool(entry.get("has_previewed", false)) and not same_value(object.get_indexed(property), entry.get("previewed")):
+			conflicts += 1
+			continue
+		object.set_indexed(property, entry.get("value"))
+		restored += 1
+	return {"restored": restored, "failed": failed, "conflicts": conflicts, "had_backup": true}
+
+
+## Resolves the object/property an animation track writes, relative to the
+## player's root node. Method, audio and nested-animation tracks are skipped.
+static func preview_track_target(root: Node, track_type: int, track_path: NodePath) -> Dictionary:
+	if root.get_node_or_null(NodePath(track_path.get_concatenated_names())) == null:
+		return {}
+	var resolved: Array = root.get_node_and_resource(track_path)
+	if resolved.size() < 3 or resolved[0] == null:
+		return {}
+	var node: Node = resolved[0]
+	var resource: Resource = resolved[1]
+	var remaining: NodePath = resolved[2]
+	match track_type:
+		Animation.TYPE_POSITION_3D:
+			return {"object": node, "property": "position"}
+		Animation.TYPE_ROTATION_3D:
+			return {"object": node, "property": "quaternion"}
+		Animation.TYPE_SCALE_3D:
+			return {"object": node, "property": "scale"}
+		Animation.TYPE_BLEND_SHAPE:
+			if track_path.get_subname_count() == 0:
+				return {}
+			return {"object": node, "property": "blend_shapes/" + str(track_path.get_subname(track_path.get_subname_count() - 1))}
+		Animation.TYPE_VALUE, Animation.TYPE_BEZIER:
+			if resource != null and remaining.get_subname_count() > 0:
+				return {"object": resource, "property": str(remaining.get_subname(0))}
+			if track_path.get_subname_count() == 0:
+				return {}
+			if resource == null:
+				# Back up the whole base property (position, not position:x).
+				return {"object": node, "property": str(track_path.get_subname(0))}
+			return {"object": node, "property": track_path.get_concatenated_subnames()}
+	return {}
 
 
 func resolve_animation_player(node_path: String) -> Dictionary:

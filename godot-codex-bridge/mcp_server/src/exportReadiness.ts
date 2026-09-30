@@ -2,8 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { isInsidePath } from "./config.js";
+import { readFileInsideRootBoundedSync } from "./physicalPath.js";
 import type { JsonObject, ToolEnvelope } from "./types.js";
 
+const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 const DESKTOP_PLATFORMS = ["windows desktop", "linux", "macos"];
 const MOBILE_PLATFORMS = ["android", "ios"];
 
@@ -19,8 +21,8 @@ export async function checkExportReadiness(projectRoot: string, godotExecutable:
   const projectFile = path.join(projectRoot, "project.godot");
   const exportPresetsFile = path.join(projectRoot, "export_presets.cfg");
   const findings: JsonObject[] = [];
-  const projectText = await readTextIfExists(projectFile);
-  const exportPresetsText = await readTextIfExists(exportPresetsFile);
+  const projectText = readTextIfExists(projectRoot, projectFile);
+  const exportPresetsText = readTextIfExists(projectRoot, exportPresetsFile);
   const projectSettings = projectText ? parseGodotConfig(projectText) : {};
   const presets = exportPresetsText ? parseExportPresets(exportPresetsText) : [];
 
@@ -184,9 +186,9 @@ function resolveResPath(projectRoot: string, value: string): string | null {
   return isInsidePath(projectRoot, candidate) ? candidate : null;
 }
 
-async function readTextIfExists(filePath: string): Promise<string | undefined> {
+function readTextIfExists(projectRoot: string, filePath: string): string | undefined {
   try {
-    return await fs.readFile(filePath, "utf8");
+    return readFileInsideRootBoundedSync(projectRoot, filePath, MAX_CONFIG_BYTES).toString("utf8");
   } catch {
     return undefined;
   }

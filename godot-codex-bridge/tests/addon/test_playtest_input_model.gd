@@ -22,6 +22,7 @@ func _run() -> void:
 	var context := BridgeContext.new()
 	context.permissions = {"allow_playtest_input": false}
 	context.ensure_bridge_dirs = Callable(self, "_ensure_dirs")
+	context.ensure_safe_directory = Callable(self, "_ensure_safe_dir")
 	context.write_json_file = Callable(self, "_write_json_file")
 	var model := PlaytestInputModel.new(
 		context,
@@ -179,6 +180,10 @@ func _runtime_roundtrip() -> void:
 
 func _ensure_dirs() -> void:
 	pass
+
+
+func _ensure_safe_dir(_path: String) -> Dictionary:
+	return {"ok": true}
 
 
 func _write_json_file(path: String, data: Dictionary) -> Dictionary:

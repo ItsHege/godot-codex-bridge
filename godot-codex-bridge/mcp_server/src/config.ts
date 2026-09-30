@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { readFileInsideRootBoundedSync } from "./physicalPath.js";
 import type { ServerConfig } from "./types.js";
 
 const DEFAULT_ADDON_REQUEST_TIMEOUT_MS = 5_000;
@@ -69,7 +70,7 @@ export function boundedNumber(value: number, min: number, max: number): number {
 }
 
 function envOrArg(envName: string, argName: string): string | undefined {
-  return process.env[envName] ?? argValue(argName);
+  return argValue(argName) ?? process.env[envName];
 }
 
 function numberFromEnvOrArg(envName: string, argName: string): number | undefined {
@@ -119,7 +120,8 @@ export function discoverHostRpcUrl(projectRoot: string): string | null {
 		return null;
 	}
 	try {
-		const parsed = JSON.parse(stripUtf8Bom(fs.readFileSync(configPath, "utf8"))) as { port?: unknown; host?: unknown };
+		const text = readFileInsideRootBoundedSync(projectRoot, configPath, 64 * 1024).toString("utf8");
+		const parsed = JSON.parse(stripUtf8Bom(text)) as { port?: unknown; host?: unknown };
 		const port = Number(parsed.port);
 		if (!Number.isFinite(port) || port <= 0) {
 			return null;
@@ -158,38 +160,19 @@ export function discoverGodotExecutable(explicit?: string, projectRoot?: string)
 		return normalizePath(godotBin.trim());
 	}
 
-	// 3. Project-local config file if present (.godot_bin)
-	if (projectRoot) {
-		const localBinFile = path.join(projectRoot, ".godot_bin");
-		if (fs.existsSync(localBinFile)) {
-			try {
-				const content = fs.readFileSync(localBinFile, "utf8").trim();
-				if (content.length > 0) {
-					return normalizePath(content);
-				}
-			} catch {
-				// ignore read error
-			}
-		}
-	}
-
-	// 4. Search PATH for discoverable Godot binaries
-	const onPath = findGodotOnPath();
-	if (onPath) {
-		return onPath;
-	}
-
-	// 5. Compatible legacy environment variables: GODOT_EXECUTABLE, GODOT_PATH
+	// 3. Compatible operator-controlled legacy environment variables.
 	const compatEnv = process.env.GODOT_EXECUTABLE ?? process.env.GODOT_PATH;
 	if (compatEnv && compatEnv.trim() !== "") {
 		return normalizePath(compatEnv.trim());
 	}
 
-	// 6. Actionable default executable name
-	return process.platform === "win32" ? "godot.exe" : "godot";
+	// 4. Search absolute operator-controlled PATH entries. Relative entries and
+	// project-local candidates are never executable authority.
+	const onPath = findGodotOnPath(process.env.PATH, projectRoot);
+	return onPath ?? "";
 }
 
-export function findGodotOnPath(pathEnv: string | undefined = process.env.PATH): string | null {
+export function findGodotOnPath(pathEnv: string | undefined = process.env.PATH, rejectedRoot?: string): string | null {
 	if (!pathEnv) {
 		return null;
 	}
@@ -201,8 +184,14 @@ export function findGodotOnPath(pathEnv: string | undefined = process.env.PATH):
 
 	const dirs = pathEnv.split(delimiter).map((d) => d.trim()).filter(Boolean);
 	for (const dir of dirs) {
+		if (!path.isAbsolute(dir)) {
+			continue;
+		}
 		for (const name of candidateNames) {
-			const candidatePath = path.join(dir, name);
+			const candidatePath = path.resolve(dir, name);
+			if (rejectedRoot && isInsidePath(rejectedRoot, candidatePath)) {
+				continue;
+			}
 			try {
 				if (fs.existsSync(candidatePath)) {
 					const stat = fs.statSync(candidatePath);

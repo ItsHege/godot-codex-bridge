@@ -20,6 +20,8 @@ func create_node(params: Dictionary) -> Dictionary:
 		return parent_result
 	var parent: Node = parent_result.get("node", null)
 	var scene_root: Node = parent_result.get("scene_root", null)
+	if not is_editable_in_scene(parent, scene_root):
+		return _err("parent_not_editable", "The parent is inside an instanced scene without Editable Children, so a child added there would not be saved.")
 	var node_class := sanitize_node_class_name(str(params.get("class_name", params.get("className", "Node"))).strip_edges())
 	if node_class == "":
 		return _err("invalid_node_class", "className is required.")
@@ -44,6 +46,7 @@ func create_node(params: Dictionary) -> Dictionary:
 	undo.add_do_method(parent, "add_child", node)
 	undo.add_do_method(parent, "move_child", node, index)
 	undo.add_do_property(node, "owner", scene_root)
+	undo.add_do_reference(node)
 	undo.add_undo_property(node, "owner", null)
 	undo.add_undo_method(parent, "remove_child", node)
 	undo.commit_action()
@@ -77,22 +80,28 @@ func delete_node(params: Dictionary) -> Dictionary:
 	var scene_root: Node = node_result.get("scene_root", null)
 	if node == scene_root:
 		return _err("unsupported_node_delete", "Deleting the edited scene root is not supported.")
+	if node.owner != scene_root:
+		return _foreign_node_error("delete")
 	var parent := node.get_parent()
 	if parent == null:
 		return _err("node_has_no_parent", "Node has no parent and cannot be removed.")
 	var index := node.get_index()
-	var owner := node.owner
 	var before := node_ref_payload(node, scene_root)
+	# remove_child() clears the owner of every node in the subtree whose owner
+	# is outside it, so record them all and restore them after re-adding.
+	var owned := externally_owned_nodes(node)
 
 	var undo := _undo_redo()
 	if undo == null:
 		return _err("undo_redo_unavailable", "Editor UndoRedo manager is unavailable.")
 	undo.create_action("Godot Codex Bridge: delete node")
-	undo.add_do_property(node, "owner", null)
 	undo.add_do_method(parent, "remove_child", node)
 	undo.add_undo_method(parent, "add_child", node)
 	undo.add_undo_method(parent, "move_child", node, index)
-	undo.add_undo_property(node, "owner", owner)
+	for entry in owned:
+		undo.add_undo_property(entry.get("node"), "owner", entry.get("owner"))
+	# The removed subtree is freed by UndoRedo if this action is discarded.
+	undo.add_undo_reference(node)
 	undo.commit_action()
 
 	var selection := EditorInterface.get_selection()
@@ -177,13 +186,17 @@ func reparent_node(params: Dictionary) -> Dictionary:
 		return _err("unsupported_node_reparent", "Reparenting the edited scene root is not supported.")
 	if node == new_parent or node.is_ancestor_of(new_parent):
 		return _err("invalid_reparent_target", "Cannot reparent a node under itself or one of its descendants.")
+	if node.owner != scene_root:
+		return _foreign_node_error("reparent")
+	if not is_editable_in_scene(new_parent, scene_root):
+		return _err("parent_not_editable", "The new parent is inside an instanced scene without Editable Children, so the moved node would not be saved there.")
 	var old_parent := node.get_parent()
 	if old_parent == null:
 		return _err("node_has_no_parent", "Node has no parent and cannot be reparented.")
 	var old_index := node.get_index()
 	var new_index := bounded_child_index(new_parent, int(params.get("index", -1)))
 	var before := node_ref_payload(node, scene_root)
-	var owner := node.owner
+	var owned := externally_owned_nodes(node)
 
 	var undo := _undo_redo()
 	if undo == null:
@@ -192,11 +205,13 @@ func reparent_node(params: Dictionary) -> Dictionary:
 	undo.add_do_method(old_parent, "remove_child", node)
 	undo.add_do_method(new_parent, "add_child", node)
 	undo.add_do_method(new_parent, "move_child", node, new_index)
-	undo.add_do_property(node, "owner", scene_root)
+	for entry in owned:
+		undo.add_do_property(entry.get("node"), "owner", owner_after_reparent(entry.get("owner"), new_parent, scene_root))
 	undo.add_undo_method(new_parent, "remove_child", node)
 	undo.add_undo_method(old_parent, "add_child", node)
 	undo.add_undo_method(old_parent, "move_child", node, old_index)
-	undo.add_undo_property(node, "owner", owner)
+	for entry in owned:
+		undo.add_undo_property(entry.get("node"), "owner", entry.get("owner"))
 	undo.commit_action()
 
 	select_single_node(node)
@@ -238,6 +253,8 @@ func duplicate_node(params: Dictionary) -> Dictionary:
 		parent = parent_result.get("node", null)
 	if parent == null:
 		return _err("node_has_no_parent", "Node has no parent and cannot be duplicated.")
+	if not is_editable_in_scene(parent, scene_root):
+		return _err("parent_not_editable", "The target parent is inside an instanced scene without Editable Children, so the copy would not be saved.")
 	var duplicate: Node = node.duplicate()
 	if duplicate == null:
 		return _err("node_duplicate_failed", "Godot failed to duplicate node.")
@@ -254,7 +271,20 @@ func duplicate_node(params: Dictionary) -> Dictionary:
 	undo.create_action("Godot Codex Bridge: duplicate node")
 	undo.add_do_method(parent, "add_child", duplicate)
 	undo.add_do_method(parent, "move_child", duplicate, index)
-	undo.add_do_method(self, "_set_owner_recursive", duplicate, scene_root)
+	# Copies are new nodes of the edited scene: every copied node whose source
+	# was owned outside the duplicated subtree (the edited scene, or an editable
+	# instance the source lives in) becomes scene-owned so it is saved. Nodes
+	# owned inside the subtree (nested instance internals) keep the owner
+	# duplicate() gave them.
+	undo.add_do_property(duplicate, "owner", scene_root)
+	for entry in externally_owned_nodes(node):
+		var source := entry.get("node") as Node
+		if source == node:
+			continue
+		var copy := duplicate.get_node_or_null(node.get_path_to(source))
+		if copy != null:
+			undo.add_do_property(copy, "owner", scene_root)
+	undo.add_do_reference(duplicate)
 	undo.add_undo_method(parent, "remove_child", duplicate)
 	undo.commit_action()
 
@@ -288,6 +318,8 @@ func instance_scene(params: Dictionary) -> Dictionary:
 		return parent_result
 	var parent: Node = parent_result.get("node", null)
 	var scene_root: Node = parent_result.get("scene_root", null)
+	if not is_editable_in_scene(parent, scene_root):
+		return _err("parent_not_editable", "The parent is inside an instanced scene without Editable Children, so the instance would not be saved there.")
 	var packed: Variant = ResourceLoader.load(scene_path)
 	if not (packed is PackedScene):
 		return _err("invalid_packed_scene", "Resource is not a PackedScene: " + scene_path)
@@ -308,6 +340,7 @@ func instance_scene(params: Dictionary) -> Dictionary:
 	undo.add_do_method(parent, "add_child", instance)
 	undo.add_do_method(parent, "move_child", instance, index)
 	undo.add_do_property(instance, "owner", scene_root)
+	undo.add_do_reference(instance)
 	undo.add_undo_property(instance, "owner", null)
 	undo.add_undo_method(parent, "remove_child", instance)
 	undo.commit_action()
@@ -390,13 +423,58 @@ func select_single_node(node: Node) -> void:
 	EditorInterface.edit_node(node)
 
 
-func _set_owner_recursive(node: Node, owner: Node) -> void:
-	if node == null:
-		return
-	node.owner = owner
+## Nodes in root's subtree (root included) whose owner lies outside it, in
+## tree order. remove_child() clears exactly these owners, so they are what
+## delete/reparent must record and restore. Nodes owned inside the subtree
+## (instanced sub-scene internals) keep their owner through removal.
+static func externally_owned_nodes(root: Node) -> Array:
+	var result: Array = []
+	if root != null:
+		_collect_externally_owned(root, root, result)
+	return result
+
+
+static func _collect_externally_owned(root: Node, node: Node, result: Array) -> void:
+	var owner := node.owner
+	if owner != null and owner != root and not root.is_ancestor_of(owner):
+		result.append({"node": node, "owner": owner})
 	for child in node.get_children():
-		if child is Node:
-			_set_owner_recursive(child, owner)
+		_collect_externally_owned(root, child, result)
+
+
+## True when `node` is the edited scene root or reachable through owners that
+## are the scene root or instances with Editable Children enabled - i.e. the
+## node is visible and editable in the Scene dock.
+static func is_editable_in_scene(node: Node, scene_root: Node) -> bool:
+	var current := node
+	var guard := 0
+	while current != scene_root:
+		guard += 1
+		if current == null or guard > 64:
+			return false
+		var owner := current.owner
+		if owner == null:
+			return false
+		if owner != scene_root and not scene_root.is_editable_instance(owner):
+			return false
+		current = owner
+	return true
+
+
+## Like Godot's Scene dock, delete/reparent only nodes the edited scene owns.
+## Nodes that belong to an instanced sub-scene are recreated
+## from that scene on reload, so removing or moving them would not persist and
+## a moved copy would duplicate after reload.
+func _foreign_node_error(operation: String) -> Dictionary:
+	return _err("foreign_scene_node", "Cannot " + operation + " a node that belongs to an instanced sub-scene; edit that scene instead.")
+
+
+## An owner must stay an ancestor after the move; otherwise the node becomes
+## owned by the edited scene root so it is still saved.
+static func owner_after_reparent(owner: Node, new_parent: Node, scene_root: Node) -> Node:
+	if owner != null and (owner == new_parent or owner.is_ancestor_of(new_parent)):
+		return owner
+	return scene_root
 
 
 func _resolve_editor_node(node_path: String) -> Dictionary:

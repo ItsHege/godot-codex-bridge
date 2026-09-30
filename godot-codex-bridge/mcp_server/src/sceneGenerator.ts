@@ -44,7 +44,7 @@ export async function generateSceneFromPrompt(
       error: {
         code: "scene_generator_apply_removed",
         message:
-          "generate_scene_from_prompt no longer writes generated .tscn templates. Use the live editor tools, review changes in Godot, then call godot.save_scene when ready.",
+          "generate_scene_from_prompt no longer writes generated .tscn templates. Use the live editor tools, review changes in Godot, then save manually from the normal Godot UI.",
       },
       replacement_tools: [
         "godot.open_scene",
@@ -53,7 +53,6 @@ export async function generateSceneFromPrompt(
         "godot.create_node_resource",
         "godot.set_node_transform",
         "godot.set_node_properties",
-        "godot.save_scene",
       ],
     };
   }
@@ -93,10 +92,10 @@ export async function generateSceneFromPrompt(
     planned_actions: plan.plannedActions,
     suggested_tool_calls: plan.suggestedToolCalls,
     recommended_tools: plan.recommendedTools,
-    execution_order: "inspect_open_focus_mutate_capture_then_save_when_approved",
+    execution_order: "inspect_open_focus_mutate_capture_then_manual_ui_save",
     write_behavior: "no_file_write_no_generated_scene_content_no_apply",
     apply_hint:
-      "This tool intentionally does not return proposed_content or apply files. Execute the plan with live editor tools, inspect the scene, then save explicitly with godot.save_scene if the bridge permission is enabled.",
+      "This tool intentionally does not return proposed_content or apply files. Execute the plan with live editor tools, inspect the scene, then save manually from the normal Godot UI. Direct Bridge save tools remain disabled.",
   };
 }
 
@@ -197,10 +196,9 @@ function createLiveEditorPlan(prompt: string, targetScene: string, targetExists:
   }));
 
   plannedActions.push({
-    step: "persist_when_approved",
-    tool: "godot.save_scene",
-    permission: "allow_scene_save",
-    purpose: "Save only after inspecting the live editor result and confirming the scene should persist.",
+    step: "persist_manually_after_review",
+    tool: "manual_godot_ui_save",
+    purpose: "Use the normal Godot UI to save only after inspecting and accepting the live editor result; direct Bridge save tools are disabled.",
   });
 
   return {
@@ -220,7 +218,6 @@ function createLiveEditorPlan(prompt: string, targetScene: string, targetExists:
       "godot.set_node_transform",
       "godot.set_node_properties",
       "godot.capture_viewport_screenshot",
-      "godot.save_scene",
     ],
     notes: [
       "This is a live-editor plan, not a generated .tscn template.",

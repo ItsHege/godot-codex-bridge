@@ -153,7 +153,8 @@ test("HostController wraps runtime approval with host nonce and resolves respons
     requested_path: "res://test.gd",
     absolute_path: path.join(projectRoot, "test.gd"),
     existed: false,
-    copied: false
+    copied: false,
+    rollback_action: "delete_created_file"
   });
 });
 

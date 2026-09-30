@@ -4,12 +4,23 @@ extends RefCounted
 const AnnotationCanvas := preload("annotation_canvas.gd")
 const AnnotationArtifactModel := preload("annotation_artifact_model.gd")
 const BridgeContext := preload("bridge_context.gd")
+const AnnotationViewModel := preload("annotation_view_model.gd")
+const DockStyle := preload("dock_style.gd")
 
 var ctx: BridgeContext
 var dialog: Window
 var canvas: AnnotationCanvas
 var scope_option: OptionButton
-var tool_option: OptionButton
+## Marker tool toggle buttons keyed by tool id (one ButtonGroup).
+var tool_buttons := {}
+var _active_tool := "rectangle"
+var attach_button: Button
+var marker_list: VBoxContainer
+var marker_list_empty: Label
+var _selected_marker := -1
+## Size/position remembered for this editor session (Rect2i()).
+var _remembered_rect := Rect2i()
+var _style: Dictionary = {}
 var status_label: Label
 var zoom_label: Label
 var size_toggle_button: Button
@@ -103,107 +114,32 @@ func ensure_dialog() -> void:
 	var owner := ctx.owner_node
 	if owner == null:
 		return
+	_style = DockStyle.resolve(EditorInterface.get_base_control() if Engine.is_editor_hint() else null)
 	dialog = Window.new()
 	dialog.title = "Eye Attach"
 	dialog.unresizable = false
-	dialog.min_size = Vector2i(640, 420)
-	dialog.close_requested.connect(func() -> void:
-		dialog.hide()
-	)
+	dialog.min_size = AnnotationViewModel.MIN_WINDOW
+	dialog.close_requested.connect(cancel_dialog)
+	dialog.window_input.connect(_on_dialog_input)
 	owner.add_child(dialog)
 
+	var background := PanelContainer.new()
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dialog.add_child(background)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, DockStyle.SPACE_M)
+	background.add_child(margin)
 	var root := VBoxContainer.new()
-	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 10)
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 14
-	root.offset_top = 14
-	root.offset_right = -14
-	root.offset_bottom = -14
-	dialog.add_child(root)
+	root.add_theme_constant_override("separation", DockStyle.SPACE_S + 2)
+	margin.add_child(root)
 
-	var hint := Label.new()
-	hint.text = "Draw user reference markers. Codex will be told these marks are annotations, not game art."
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	root.add_child(hint)
-
-	var action_row := HBoxContainer.new()
-	action_row.add_theme_constant_override("separation", 8)
-	root.add_child(action_row)
-
-	var attach_button := Button.new()
-	attach_button.text = "Attach"
-	attach_button.tooltip_text = "Attach this AI-safe marker to the next Codex message."
-	attach_button.pressed.connect(attach_current_annotation)
-	action_row.add_child(attach_button)
-
-	var cancel_button := Button.new()
-	cancel_button.text = "Cancel"
-	cancel_button.tooltip_text = "Close Eye Attach without attaching a marker."
-	cancel_button.pressed.connect(func() -> void:
-		if dialog != null:
-			dialog.hide()
-	)
-	action_row.add_child(cancel_button)
-
-	var zoom_out_button := Button.new()
-	zoom_out_button.text = "-"
-	zoom_out_button.tooltip_text = "Zoom out"
-	zoom_out_button.pressed.connect(func() -> void:
-		if canvas != null:
-			canvas.zoom_out()
-			update_status()
-	)
-	action_row.add_child(zoom_out_button)
-
-	var zoom_in_button := Button.new()
-	zoom_in_button.text = "+"
-	zoom_in_button.tooltip_text = "Zoom in"
-	zoom_in_button.pressed.connect(func() -> void:
-		if canvas != null:
-			canvas.zoom_in()
-			update_status()
-	)
-	action_row.add_child(zoom_in_button)
-
-	var zoom_fit_button := Button.new()
-	zoom_fit_button.text = "Fit"
-	zoom_fit_button.tooltip_text = "Fit image"
-	zoom_fit_button.pressed.connect(func() -> void:
-		if canvas != null:
-			canvas.zoom_reset()
-			update_status()
-	)
-	action_row.add_child(zoom_fit_button)
-
-	var zoom_actual_button := Button.new()
-	zoom_actual_button.text = "1:1"
-	zoom_actual_button.tooltip_text = "Actual size"
-	zoom_actual_button.pressed.connect(func() -> void:
-		if canvas != null:
-			canvas.zoom_to_actual()
-			update_status()
-	)
-	action_row.add_child(zoom_actual_button)
-
-	zoom_label = Label.new()
-	zoom_label.text = "Zoom: fit"
-	zoom_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	action_row.add_child(zoom_label)
-
-	size_toggle_button = Button.new()
-	size_toggle_button.text = "Max"
-	size_toggle_button.tooltip_text = "Toggle a larger Eye Attach window."
-	size_toggle_button.pressed.connect(toggle_window_size)
-	action_row.add_child(size_toggle_button)
-
-	var capture_row := HBoxContainer.new()
-	capture_row.add_theme_constant_override("separation", 8)
-	root.add_child(capture_row)
-
+	# One toolbar: source + recapture | marker tools | undo, clear | zoom, size, help.
+	var toolbar := HBoxContainer.new()
+	toolbar.add_theme_constant_override("separation", DockStyle.SPACE_S)
+	root.add_child(toolbar)
 	scope_option = OptionButton.new()
-	scope_option.tooltip_text = "Capture scope. Editor Window can mark FileSystem, Inspector, errors and scene UI."
+	scope_option.tooltip_text = "Capture source. Editor Window can mark FileSystem, Inspector, errors and scene UI."
 	scope_option.add_item("Editor Window")
 	scope_option.set_item_metadata(0, "editor_window")
 	scope_option.add_item("3D Viewport")
@@ -213,80 +149,247 @@ func ensure_dialog() -> void:
 	scope_option.item_selected.connect(func(_index: int) -> void:
 		recapture_annotation_source()
 	)
-	capture_row.add_child(scope_option)
-
-	tool_option = OptionButton.new()
-	tool_option.tooltip_text = "Marker tool."
-	tool_option.add_item("Rectangle")
-	tool_option.set_item_metadata(0, "rectangle")
-	tool_option.add_item("Pin")
-	tool_option.set_item_metadata(1, "pin")
-	tool_option.add_item("Arrow")
-	tool_option.set_item_metadata(2, "arrow")
-	tool_option.add_item("Freehand")
-	tool_option.set_item_metadata(3, "freehand")
-	tool_option.add_item("Text Label")
-	tool_option.set_item_metadata(4, "text")
-	tool_option.item_selected.connect(func(_index: int) -> void:
-		if canvas != null:
-			canvas.set_tool(selected_tool())
-	)
-	capture_row.add_child(tool_option)
-
-	var recapture_button := Button.new()
-	recapture_button.text = "Recapture"
-	recapture_button.tooltip_text = "Capture the selected Godot view again."
-	recapture_button.pressed.connect(recapture_annotation_source)
-	capture_row.add_child(recapture_button)
-
-	var undo_button := Button.new()
-	undo_button.text = "Undo"
-	undo_button.pressed.connect(func() -> void:
+	toolbar.add_child(scope_option)
+	toolbar.add_child(_icon_button("Reload", "Recapture", "Capture the selected Godot view again.", recapture_annotation_source))
+	toolbar.add_child(VSeparator.new())
+	var group := ButtonGroup.new()
+	for tool in AnnotationViewModel.TOOLS:
+		var tool_id := str(tool.get("id"))
+		var button := _icon_button(str(tool.get("icon")), str(tool.get("label")), str(tool.get("tip")), func() -> void:
+			set_active_tool(tool_id)
+		)
+		button.toggle_mode = true
+		button.button_group = group
+		button.button_pressed = tool_id == _active_tool
+		tool_buttons[tool_id] = button
+		toolbar.add_child(button)
+	toolbar.add_child(VSeparator.new())
+	toolbar.add_child(_icon_button("UndoRedo", "Undo", "Undo the last marker (Ctrl+Z).", func() -> void:
 		if canvas != null:
 			canvas.undo_marker()
 			update_status()
-	)
-	capture_row.add_child(undo_button)
-
-	var clear_marker_button := Button.new()
-	clear_marker_button.text = "Clear"
-	clear_marker_button.pressed.connect(func() -> void:
+	))
+	toolbar.add_child(_icon_button("Clear", "Clear", "Remove all markers.", func() -> void:
 		if canvas != null:
 			canvas.clear_markers()
 			update_status()
-	)
-	capture_row.add_child(clear_marker_button)
+	))
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toolbar.add_child(spacer)
+	toolbar.add_child(_icon_button("ZoomLess", "-", "Zoom out", func() -> void:
+		if canvas != null:
+			canvas.zoom_out()
+			update_status()
+	))
+	zoom_label = Label.new()
+	zoom_label.text = "fit"
+	zoom_label.custom_minimum_size = Vector2(44, 0)
+	zoom_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	zoom_label.tooltip_text = "Zoom"
+	zoom_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	toolbar.add_child(zoom_label)
+	toolbar.add_child(_icon_button("ZoomMore", "+", "Zoom in", func() -> void:
+		if canvas != null:
+			canvas.zoom_in()
+			update_status()
+	))
+	toolbar.add_child(_icon_button("CenterView", "Fit", "Fit image", func() -> void:
+		if canvas != null:
+			canvas.zoom_reset()
+			update_status()
+	))
+	toolbar.add_child(_icon_button("ZoomReset", "1:1", "Actual size", func() -> void:
+		if canvas != null:
+			canvas.zoom_to_actual()
+			update_status()
+	))
+	size_toggle_button = _icon_button("DistractionFree", "Max", "", toggle_window_size)
+	toolbar.add_child(size_toggle_button)
+	var help := _icon_button("Info", "?", AnnotationViewModel.HELP_TEXT + "\nShortcuts: Esc cancel · Enter attach · Ctrl+Z undo · Del remove selected marker.", func() -> void: pass)
+	help.focus_mode = Control.FOCUS_NONE
+	toolbar.add_child(help)
 
-	status_label = Label.new()
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	root.add_child(status_label)
-
+	# Image area (dominant) + marker list.
+	var body := HSplitContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(body)
+	var frame := PanelContainer.new()
+	frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	frame.add_theme_stylebox_override("panel", DockStyle.card_box(Color(0, 0, 0, 0.35), Color(0, 0, 0, 0), 0, Vector2(1, 1)))
+	body.add_child(frame)
 	canvas = AnnotationCanvas.new()
 	canvas.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	canvas.custom_minimum_size = Vector2(820, 500)
+	canvas.custom_minimum_size = Vector2(420, 280)
 	canvas.set_tool(selected_tool())
 	canvas.markers_changed.connect(update_status)
-	root.add_child(canvas)
+	frame.add_child(canvas)
+
+	var side := VBoxContainer.new()
+	side.custom_minimum_size = Vector2(150, 0)
+	side.add_theme_constant_override("separation", DockStyle.SPACE_S)
+	body.add_child(side)
+	var side_title := Label.new()
+	side_title.text = "MARKERS"
+	DockStyle.muted_label(_style, side_title, 11)
+	side.add_child(side_title)
+	var list_scroll := ScrollContainer.new()
+	list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	side.add_child(list_scroll)
+	marker_list = VBoxContainer.new()
+	marker_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_scroll.add_child(marker_list)
+	marker_list_empty = Label.new()
+	marker_list_empty.text = "Draw on the image to add markers."
+	marker_list_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	DockStyle.muted_label(_style, marker_list_empty)
+	side.add_child(marker_list_empty)
+
+	# Bottom bar: muted status left, Cancel + Attach right.
+	var bottom := HBoxContainer.new()
+	bottom.add_theme_constant_override("separation", DockStyle.SPACE_S)
+	root.add_child(bottom)
+	status_label = Label.new()
+	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_label.clip_text = true
+	status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	status_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	DockStyle.muted_label(_style, status_label, 12)
+	bottom.add_child(status_label)
+	var cancel_button := Button.new()
+	cancel_button.text = "Cancel"
+	cancel_button.tooltip_text = "Close Eye Attach without attaching a marker (Esc)."
+	cancel_button.pressed.connect(cancel_dialog)
+	bottom.add_child(cancel_button)
+	attach_button = Button.new()
+	attach_button.text = "Attach"
+	attach_button.tooltip_text = "Attach these AI-safe markers to the next Codex message (Enter)."
+	attach_button.pressed.connect(attach_current_annotation)
+	DockStyle.apply_accent_button(attach_button, _style)
+	bottom.add_child(attach_button)
+	update_status()
+
+
+func _icon_button(icon_name: String, fallback_text: String, tooltip: String, callback: Callable) -> Button:
+	var button := Button.new()
+	button.text = fallback_text
+	button.tooltip_text = tooltip if tooltip != "" else fallback_text
+	button.pressed.connect(callback)
+	DockStyle.apply_icon(button, _style, icon_name, true)
+	return button
+
+
+func set_active_tool(tool_id: String) -> void:
+	if not tool_id in AnnotationViewModel.tool_ids():
+		return
+	_active_tool = tool_id
+	if tool_buttons.has(tool_id):
+		(tool_buttons[tool_id] as Button).set_pressed_no_signal(true)
+	if canvas != null:
+		canvas.set_tool(tool_id)
+
+
+func cancel_dialog() -> void:
+	if dialog == null:
+		return
+	_remember_window_rect()
+	dialog.hide()
+
+
+func _remember_window_rect() -> void:
+	if dialog != null and dialog.visible and not window_maximized:
+		_remembered_rect = Rect2i(dialog.position, dialog.size)
+
+
+func _on_dialog_input(event: InputEvent) -> void:
+	match AnnotationViewModel.key_action(event):
+		"cancel":
+			cancel_dialog()
+		"attach":
+			attach_current_annotation()
+		"undo":
+			if canvas != null:
+				canvas.undo_marker()
+				update_status()
+		"delete":
+			if canvas != null and _selected_marker >= 0:
+				canvas.remove_marker(_selected_marker)
+				_selected_marker = -1
+				update_status()
+		_:
+			return
+	dialog.set_input_as_handled()
+
+
+func _rebuild_marker_list() -> void:
+	if marker_list == null or canvas == null:
+		return
+	for child in marker_list.get_children():
+		marker_list.remove_child(child)
+		child.queue_free()
+	var rows := AnnotationViewModel.marker_rows(canvas.markers)
+	if _selected_marker >= rows.size():
+		_selected_marker = -1
+	canvas.highlight_index = _selected_marker
+	for row in rows:
+		var index := int(row.get("index", 0))
+		var line := HBoxContainer.new()
+		var select := Button.new()
+		select.flat = true
+		select.toggle_mode = true
+		select.button_pressed = index == _selected_marker
+		select.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		select.text = str(row.get("label", "")) + "  " + str(row.get("type_label", ""))
+		select.tooltip_text = "Select marker " + str(row.get("label", "")) + " (Del removes it)."
+		select.pressed.connect(func() -> void:
+			_selected_marker = -1 if _selected_marker == index else index
+			_rebuild_marker_list()
+			canvas.queue_redraw()
+		)
+		line.add_child(select)
+		var remove := _icon_button("Remove", "x", "Remove marker " + str(row.get("label", "")), func() -> void:
+			canvas.remove_marker(index)
+			_selected_marker = -1
+			update_status()
+		)
+		remove.flat = true
+		line.add_child(remove)
+		marker_list.add_child(line)
+	if marker_list_empty != null:
+		marker_list_empty.visible = rows.is_empty()
 
 
 func popup_dialog() -> void:
 	if dialog == null:
 		return
 	window_maximized = false
-	var window_size := DisplayServer.window_get_size()
-	dialog.popup_centered(AnnotationArtifactModel.default_window_size(window_size))
+	var window_size := AnnotationViewModel.window_size(DisplayServer.window_get_size(), _remembered_rect.size)
+	if _remembered_rect.size == window_size:
+		dialog.popup(Rect2i(_remembered_rect.position, window_size))
+	else:
+		dialog.popup_centered(window_size)
 	update_window_size_button()
 
 
 func toggle_window_size() -> void:
 	if dialog == null:
 		return
+	if not window_maximized:
+		_remember_window_rect()
 	window_maximized = not window_maximized
-	var window_size := DisplayServer.window_get_size()
-	var target_size := AnnotationArtifactModel.max_window_size(window_size) if window_maximized else AnnotationArtifactModel.default_window_size(window_size)
-	dialog.size = target_size
-	dialog.position = (window_size - target_size) / 2
+	var editor_size := DisplayServer.window_get_size()
+	if window_maximized:
+		dialog.size = AnnotationArtifactModel.max_window_size(editor_size)
+		dialog.move_to_center()
+	elif _remembered_rect.size == AnnotationViewModel.window_size(editor_size, _remembered_rect.size):
+		dialog.size = _remembered_rect.size
+		dialog.position = _remembered_rect.position
+	else:
+		dialog.size = AnnotationViewModel.window_size(editor_size, Vector2i.ZERO)
+		dialog.move_to_center()
 	update_window_size_button()
 	if canvas != null:
 		canvas.queue_redraw()
@@ -296,7 +399,8 @@ func toggle_window_size() -> void:
 func update_window_size_button() -> void:
 	if size_toggle_button == null:
 		return
-	size_toggle_button.text = "Small" if window_maximized else "Max"
+	if not DockStyle.is_icon_only(size_toggle_button):
+		size_toggle_button.text = "Small" if window_maximized else "Max"
 	size_toggle_button.tooltip_text = "Return Eye Attach to normal size." if window_maximized else "Make Eye Attach almost full editor size."
 
 
@@ -346,11 +450,7 @@ func selected_scope() -> String:
 
 
 func selected_tool() -> String:
-	if tool_option == null:
-		return "rectangle"
-	var metadata: Variant = tool_option.get_selected_metadata()
-	var tool := str(metadata)
-	return tool if tool in ["rectangle", "pin", "arrow", "freehand", "text"] else "rectangle"
+	return _active_tool if _active_tool in AnnotationViewModel.tool_ids() else "rectangle"
 
 
 func capture_annotation_source(scope: String) -> Dictionary:
@@ -506,18 +606,16 @@ func update_status() -> void:
 	var scope := str(source.get("capture_scope", selected_scope()))
 	var marker_count := canvas.marker_count() if canvas != null else 0
 	var image: Image = source.get("image") as Image
-	var image_text := ""
-	if image != null:
-		image_text = " | " + str(image.get_width()) + "x" + str(image.get_height())
-	var zoom_text := ""
-	if canvas != null:
-		zoom_text = " | Zoom: " + str(canvas.zoom_percent()) + "%"
-		if zoom_label != null:
-			zoom_label.text = "Zoom: " + str(canvas.zoom_percent()) + "%"
-	var fallback_text := ""
-	if source.has("fallback_reason") and source.get("fallback_reason") != null:
-		fallback_text = " | Fallback: " + str(source.get("fallback_reason"))
-	status_label.text = "Scope: " + scope + image_text + zoom_text + fallback_text + " | Markers: " + str(marker_count) + " | Wheel zoom, right/middle drag pan"
+	var image_size := Vector2i(image.get_width(), image.get_height()) if image != null else Vector2i.ZERO
+	if canvas != null and zoom_label != null:
+		zoom_label.text = str(canvas.zoom_percent()) + "%"
+	var fallback := str(source.get("fallback_reason", "")) if source.get("fallback_reason") != null else ""
+	status_label.text = AnnotationViewModel.status_text(image_size, marker_count, fallback)
+	status_label.tooltip_text = "Scope: " + scope + "\n" + status_label.text
+	if attach_button != null:
+		attach_button.text = AnnotationViewModel.attach_text(marker_count)
+		attach_button.disabled = not AnnotationViewModel.attach_enabled(marker_count, canvas != null and canvas.source_image != null)
+	_rebuild_marker_list()
 
 
 func attach_current_annotation() -> void:
@@ -537,6 +635,7 @@ func attach_current_annotation() -> void:
 	pending_annotation = result.get("annotation", {})
 	update_pending_ui()
 	if dialog != null:
+		_remember_window_rect()
 		dialog.hide()
 	ctx.append_status("Marker " + str(pending_annotation.get("primary_marker", "A")) + " attached to the next message.")
 
@@ -548,9 +647,9 @@ func write_annotation_artifact() -> Dictionary:
 	ctx.ensure_dirs()
 	var annotation_id := ctx.identifier("annotation_" + ctx.file_time() + "_" + str(Time.get_ticks_msec()), "annotation")
 	var annotation_dir_abs := ctx.annotations_dir_abs.path_join(annotation_id)
-	var err := DirAccess.make_dir_recursive_absolute(annotation_dir_abs)
-	if err != OK and err != ERR_ALREADY_EXISTS:
-		return {"ok": false, "error": ctx.err("annotation_dir_failed", "Failed to create annotation artifact directory: " + error_string(err))}
+	var dir_result := ctx.ensure_safe_dir(annotation_dir_abs)
+	if not bool(dir_result.get("ok", false)):
+		return {"ok": false, "error": dir_result.get("error", ctx.err("annotation_dir_failed", "Failed to create a safe annotation artifact directory."))}
 
 	var raw_image: Image = canvas.source_image
 	var annotated_image := canvas.render_annotated_image()
@@ -558,7 +657,11 @@ func write_annotation_artifact() -> Dictionary:
 
 	var raw_abs := annotation_dir_abs.path_join("raw.png")
 	var annotated_abs := annotation_dir_abs.path_join("annotated.png")
-	err = raw_image.save_png(raw_abs)
+	var raw_guard := ctx.validate_path(raw_abs, true)
+	var annotated_guard := ctx.validate_path(annotated_abs, true)
+	if not bool(raw_guard.get("ok", false)) or not bool(annotated_guard.get("ok", false)):
+		return {"ok": false, "error": raw_guard.get("error", annotated_guard.get("error", ctx.err("annotation_path_rejected", "Annotation artifact path is unsafe.")))}
+	var err := raw_image.save_png(raw_abs)
 	if err != OK:
 		return {"ok": false, "error": ctx.err("annotation_raw_save_failed", "Failed to save raw marker image: " + error_string(err))}
 	err = annotated_image.save_png(annotated_abs)

@@ -3,8 +3,12 @@ extends RefCounted
 
 const VERSION := "editor-control-v1"
 
+## Every entry must have a handler registered in plugin.gd
+## _register_editor_control_handlers() (editor_batch is built into
+## editor_control.gd); tests/addon/test_editor_control_manifest_parity.gd checks it.
 const ACTIONS := [
 	"refresh_context",
+	"get_state",
 	"focus_editor",
 	"focus_panel",
 	"viewport_navigate",
@@ -61,8 +65,6 @@ const ACTIONS := [
 	"notes_clear",
 	"stop_running_scene",
 	"emergency_stop",
-	"playtest_input",
-	"run_playtest_scenario",
 	"editor_batch",
 ]
 
@@ -119,9 +121,9 @@ static func capabilities(max_batch_actions: int, max_property_changes: int) -> D
 			"requires_visible_display": true,
 			"fallback_unavailable_code": "multi_view_capture_unavailable",
 		},
-		"mutation_model": "undo_redo_unsaved_with_explicit_save",
+		"mutation_model": "undo_redo_unsaved_with_manual_ui_save",
 		"auto_save_supported": false,
-		"explicit_save_supported": true,
+		"explicit_save_supported": false,
 		"native_output_clear_supported": false,
 		"native_output_read_supported": false,
 		"native_debugger_read_supported": false,

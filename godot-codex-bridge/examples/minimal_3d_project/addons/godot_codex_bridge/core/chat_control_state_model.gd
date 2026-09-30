@@ -2,6 +2,7 @@
 extends RefCounted
 
 const ChatApprovalModel := preload("res://addons/godot_codex_bridge/core/chat_approval_model.gd")
+const ChatSessionAllowModel := preload("res://addons/godot_codex_bridge/core/chat_session_allow_model.gd")
 const ChatSessionModel := preload("res://addons/godot_codex_bridge/core/chat_session_model.gd")
 const ChatStatusModel := preload("res://addons/godot_codex_bridge/core/chat_status_model.gd")
 const ChatTeamModel := preload("res://addons/godot_codex_bridge/core/chat_team_model.gd")
@@ -140,6 +141,7 @@ static func controls_state(state: Dictionary) -> Dictionary:
 		"team_cancel": {"disabled": not connected or not team_active},
 		"approve": approve_state(connected, has_approval, approval_can_approve, approval),
 		"approve_session": approve_session_state(connected, has_approval, approval_can_approve_session),
+		"allow_session_tool": allow_session_tool_state(connected, has_approval, approval),
 		"reject": {"disabled": not connected or not has_approval},
 		"revise": {"disabled": not connected or not has_approval},
 	}
@@ -224,11 +226,20 @@ static func approve_state(connected: bool, has_approval: bool, can_approve: bool
 	}
 
 
+static func allow_session_tool_state(connected: bool, has_approval: bool, approval: Dictionary) -> Dictionary:
+	var available := has_approval and ChatApprovalModel.can_allow_session_tool(approval)
+	return {
+		"disabled": not connected or not available,
+		"visible": available,
+		"tooltip": ChatSessionAllowModel.allow_tooltip(ChatSessionAllowModel.tool_name(approval)) if available else "",
+	}
+
+
 static func approve_session_state(connected: bool, has_approval: bool, can_approve_session: bool) -> Dictionary:
 	return {
 		"disabled": not connected or not has_approval or not can_approve_session,
 		"visible": has_approval and can_approve_session,
-		"tooltip": "Session approval is available for commands and file changes only." if has_approval and not can_approve_session else "Approve this request for the current app-server session where supported.",
+		"tooltip": "Session approval is available only for command execution requests." if has_approval and not can_approve_session else "Approve this command for the current app-server session where supported.",
 	}
 
 

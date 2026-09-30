@@ -65,15 +65,15 @@ func _run() -> void:
 
 	var save := PermissionProfileModel.permissions_for_profile("save")
 	_assert_true(bool(save.get("allow_scene_edits", false)), "save edits")
-	_assert_true(bool(save.get("allow_scene_save", false)), "save scene")
+	_assert_false(bool(save.get("allow_scene_save", true)), "legacy save profile cannot enable agent save")
 	_assert_true(bool(save.get("allow_clear_diagnostics", false)), "save clear diagnostics")
 	_assert_false(bool(save.get("allow_playtest_input", true)), "save playtest input remains manual-only")
 	_assert_false(bool(save.get("allow_full_trust_session", true)), "save full trust session denied")
 
 	var full_trust := PermissionProfileModel.permissions_for_profile("full_trust")
 	for key in PermissionProfileModel.permission_keys():
-		if key == "allow_playtest_input":
-			_assert_false(bool(full_trust.get(key, true)), "full trust does not enable playtest input before safety sign-off")
+		if key == "allow_playtest_input" or key == "allow_scene_save" or key == "allow_fix_selected_node":
+			_assert_false(bool(full_trust.get(key, true)), "full trust does not enable unavailable permission " + key)
 		else:
 			_assert_true(bool(full_trust.get(key, false)), "full trust enables " + key)
 

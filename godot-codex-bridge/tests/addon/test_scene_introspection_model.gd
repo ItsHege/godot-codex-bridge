@@ -25,6 +25,10 @@ func _run() -> void:
 	var vector_summary: Variant = introspection.call("_property_value_summary", Vector3(1, 2, 3))
 	_assert_true(str(vector_summary).find("\"z\": 3.0") >= 0, "scene introspection has variant codec dependency")
 	_assert_eq(introspection.call("_camera_projection_name", Camera3D.PROJECTION_PERSPECTIVE), "perspective", "camera projection helper works")
+	var scene_root := Node3D.new()
+	var scene_payload: Dictionary = introspection.call("_current_scene_payload", scene_root)
+	_assert_eq(scene_payload.get("is_dirty"), null, "unknown scene save state is not reported clean")
+	scene_root.free()
 
 
 func _assert_eq(actual: Variant, expected: Variant, label: String) -> void:

@@ -90,7 +90,7 @@ func _current_scene_payload(scene_root: Node) -> Dictionary:
 			"path": null,
 			"name": null,
 			"root_node": null,
-			"is_dirty": false,
+			"is_dirty": null,
 			"open_scenes": _open_scenes_payload(),
 		}
 
@@ -98,7 +98,10 @@ func _current_scene_payload(scene_root: Node) -> Dictionary:
 		"path": scene_root.scene_file_path,
 		"name": scene_root.name,
 		"root_node": _node_ref_payload(scene_root, scene_root),
-		"is_dirty": false,
+		# Godot exposes a way to mark a scene unsaved, but no reliable public
+		# EditorInterface getter for the tab's current unsaved state. Do not
+		# report a fabricated clean state after Bridge UndoRedo edits.
+		"is_dirty": null,
 		"open_scenes": _open_scenes_payload(),
 	}
 

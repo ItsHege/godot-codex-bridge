@@ -17,6 +17,9 @@ const ONE_BY_ONE_PNG = Buffer.from(
 // finish and BridgeClient writes the request. Keep the test observer's budget
 // independent so slow hosted-runner I/O cannot be mistaken for no request.
 const REQUEST_WRITE_OBSERVER_TIMEOUT_MS = 5_000;
+// Budget for the tool's own addon wait in tests that answer the request. Slow
+// hosted runners can take over a second between request and response.
+const ADDON_TEST_TIMEOUT_MS = 5_000;
 
 test("createGodotCodexBridgeServer registers without throwing", async () => {
   const config = await makeConfig();
@@ -609,7 +612,7 @@ test("open scene handler writes addon request for a valid scene", async () => {
     scenePath: "res://scenes/main.tscn",
     makeMainScreen: "3D",
     selectInFileSystem: true,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
 
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
@@ -626,7 +629,7 @@ test("open scene handler writes addon request for a valid scene", async () => {
   await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
   await fs.writeFile(
     path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
-    JSON.stringify({ status: "succeeded", data: { opened_scene: "res://scenes/main.tscn" } }),
+    JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { opened_scene: "res://scenes/main.tscn" } }),
     "utf8",
   );
 
@@ -645,7 +648,7 @@ test("run current scene handler accepts an optional explicit scene path", async 
   const handlers = createToolHandlers(config);
   const pending = handlers["godot.run_current_scene"]({
     scenePath: "res://scenes/playtest.tscn",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
 
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
@@ -660,7 +663,7 @@ test("run current scene handler accepts an optional explicit scene path", async 
   await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
   await fs.writeFile(
     path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
-    JSON.stringify({ status: "succeeded", data: { scene_file_path: "res://scenes/playtest.tscn" } }),
+    JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { scene_file_path: "res://scenes/playtest.tscn" } }),
     "utf8",
   );
 
@@ -691,7 +694,7 @@ test("timeline screenshot handler captures multiple frames and writes a local ma
   const pending = handlers["godot.capture_timeline_screenshots"]({
     frameCount: 2,
     intervalMs: 50,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
     reason: "animation preview",
   });
 
@@ -735,13 +738,15 @@ test("timeline screenshot handler captures multiple frames and writes a local ma
   assert.equal(Array.isArray(manifest.frames), true);
 });
 
-test("timeline screenshot handler can compare captured frames to a visual baseline", async () => {
+test("timeline screenshot handler records that baseline comparison is disabled", async () => {
   const config = await makeConfig();
   await writeLiveHeartbeat(config.bridgeDir);
   await fs.mkdir(config.bridgeDir, { recursive: true });
-  const baselinePath = path.join(config.projectRoot, "baseline.png");
-  const frameOnePath = path.join(config.projectRoot, "frame-one.png");
-  const frameTwoPath = path.join(config.projectRoot, "frame-two.png");
+  const screenshotRoot = path.join(config.bridgeDir, "artifacts", "screenshots");
+  await fs.mkdir(screenshotRoot, { recursive: true });
+  const baselinePath = path.join(screenshotRoot, "baseline.png");
+  const frameOnePath = path.join(screenshotRoot, "frame-one.png");
+  const frameTwoPath = path.join(screenshotRoot, "frame-two.png");
   await fs.writeFile(baselinePath, ONE_BY_ONE_PNG);
   await fs.writeFile(frameOnePath, ONE_BY_ONE_PNG);
   await fs.writeFile(frameTwoPath, ONE_BY_ONE_PNG);
@@ -753,7 +758,7 @@ test("timeline screenshot handler can compare captured frames to a visual baseli
   const pending = handlers["godot.capture_timeline_screenshots"]({
     frameCount: 2,
     intervalMs: 50,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
     baselineName: "timeline-main",
   });
 
@@ -780,23 +785,18 @@ test("timeline screenshot handler can compare captured frames to a visual baseli
   const comparison = result.structuredContent?.baseline_comparison as {
     status?: string;
     frame_count_compared?: number;
-    exact_match_count?: number;
-    changed_frame_count?: number;
-    comparisons?: Array<{ status?: string; exact_match?: boolean; result_path?: string }>;
+    mitigation?: string;
   };
-  assert.equal(comparison.status, "ok");
-  assert.equal(comparison.frame_count_compared, 2);
-  assert.equal(comparison.exact_match_count, 2);
-  assert.equal(comparison.changed_frame_count, 0);
-  assert.equal(comparison.comparisons?.length, 2);
-  assert.equal(comparison.comparisons?.every((item) => item.status === "ok" && item.exact_match === true), true);
+  assert.equal(comparison.status, "disabled");
+  assert.equal(comparison.frame_count_compared, 0);
+  assert.equal(comparison.mitigation, "trusted_visual_input_provenance_unavailable");
 
   const manifestPath = String(result.structuredContent?.manifest_path);
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
     baseline_comparison?: { status?: string; frame_count_compared?: number };
   };
-  assert.equal(manifest.baseline_comparison?.status, "ok");
-  assert.equal(manifest.baseline_comparison?.frame_count_compared, 2);
+  assert.equal(manifest.baseline_comparison?.status, "disabled");
+  assert.equal(manifest.baseline_comparison?.frame_count_compared, 0);
 });
 
 test("timeline screenshot handler validates bounds before sending requests", async () => {
@@ -811,13 +811,15 @@ test("timeline screenshot handler validates bounds before sending requests", asy
   assert.equal((result.structuredContent?.error as { code?: string })?.code, "invalid_timeline_frame_count");
 });
 
-test("multi-view screenshot handler writes editor_control request and can compare frames", async () => {
+test("multi-view screenshot handler writes editor_control request and records disabled comparison", async () => {
   const config = await makeConfig();
   await writeLiveHeartbeat(config.bridgeDir);
   await fs.mkdir(config.bridgeDir, { recursive: true });
-  const baselinePath = path.join(config.projectRoot, "baseline.png");
-  const frontPath = path.join(config.projectRoot, "front.png");
-  const topPath = path.join(config.projectRoot, "top.png");
+  const screenshotRoot = path.join(config.bridgeDir, "artifacts", "screenshots");
+  await fs.mkdir(screenshotRoot, { recursive: true });
+  const baselinePath = path.join(screenshotRoot, "baseline.png");
+  const frontPath = path.join(screenshotRoot, "front.png");
+  const topPath = path.join(screenshotRoot, "top.png");
   await fs.writeFile(baselinePath, ONE_BY_ONE_PNG);
   await fs.writeFile(frontPath, ONE_BY_ONE_PNG);
   await fs.writeFile(topPath, ONE_BY_ONE_PNG);
@@ -833,7 +835,7 @@ test("multi-view screenshot handler writes editor_control request and can compar
     height: 480,
     maxNodes: 12,
     baselineName: "multi-view-house",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
 
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
@@ -874,11 +876,11 @@ test("multi-view screenshot handler writes editor_control request and can compar
   const comparison = result.structuredContent?.baseline_comparison as {
     status?: string;
     compared_frames?: number;
-    comparisons?: Array<{ result?: { status?: string; exact_match?: boolean } }>;
+    mitigation?: string;
   };
-  assert.equal(comparison.status, "ok");
-  assert.equal(comparison.compared_frames, 2);
-  assert.equal(comparison.comparisons?.every((item) => item.result?.status === "ok" && item.result?.exact_match === true), true);
+  assert.equal(comparison.status, "disabled");
+  assert.equal(comparison.compared_frames, 0);
+  assert.equal(comparison.mitigation, "trusted_visual_input_provenance_unavailable");
 
   const invalidView = await handlers["godot.capture_multi_view_screenshots"]({ views: ["front", "diagonal"] });
   assert.equal(invalidView.isError, true);
@@ -894,7 +896,7 @@ test("editor get state writes editor_control request", async () => {
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const pending = handlers["godot.editor_get_state"]({ timeoutMs: 1_000 });
+  const pending = handlers["godot.editor_get_state"]({ timeoutMs: ADDON_TEST_TIMEOUT_MS });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
     request_id: string;
@@ -928,7 +930,7 @@ test("editor focus validates file path and writes editor_control request", async
   const pending = handlers["godot.editor_focus"]({
     mainScreen: "3D",
     selectFile: "res://scenes/main.tscn",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -954,7 +956,7 @@ test("get inspector context writes editor_control request", async () => {
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const pending = handlers["godot.get_inspector_context"]({ timeoutMs: 1_000 });
+  const pending = handlers["godot.get_inspector_context"]({ timeoutMs: ADDON_TEST_TIMEOUT_MS });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
     request_id: string;
@@ -992,7 +994,7 @@ test("editor focus panel validates panel name and writes editor_control request"
 
   const pending = handlers["godot.editor_focus_panel"]({
     panel: "Debugger",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1034,7 +1036,7 @@ test("editor viewport navigate validates input, writes editor_control request an
     action: "pan",
     deltaX: 12,
     deltaY: -8,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
 
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
@@ -1103,7 +1105,7 @@ test("set node transform and editor batch write editor_control requests", async 
     nodePath: "Camera3D",
     mode: "relative",
     position: { x: 1, y: 0, z: 0 },
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   let request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1126,7 +1128,7 @@ test("set node transform and editor batch write editor_control requests", async 
       { action: "focus_editor", params: { main_screen: "3D" } },
       { action: "select_node", params: { node_path: "Camera3D" } },
     ],
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1149,7 +1151,7 @@ test("undo last bridge action writes guarded editor_control request", async () =
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const undoPending = handlers["godot.undo_last_bridge_action"]({ timeoutMs: 1_000 });
+  const undoPending = handlers["godot.undo_last_bridge_action"]({ timeoutMs: ADDON_TEST_TIMEOUT_MS });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
     request_id: string;
@@ -1179,7 +1181,7 @@ test("stop running scene writes editor_control request", async () => {
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const stopPending = handlers["godot.stop_running_scene"]({ timeoutMs: 1_000 });
+  const stopPending = handlers["godot.stop_running_scene"]({ timeoutMs: ADDON_TEST_TIMEOUT_MS });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
     request_id: string;
@@ -1201,7 +1203,7 @@ test("emergency stop writes editor_control request", async () => {
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const stopPending = handlers["godot.emergency_stop"]({ timeoutMs: 1_000 });
+  const stopPending = handlers["godot.emergency_stop"]({ timeoutMs: ADDON_TEST_TIMEOUT_MS });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
     request_id: string;
@@ -1218,7 +1220,16 @@ test("emergency stop writes editor_control request", async () => {
   assert.equal((await stopPending).isError, false);
 });
 
-test("playtest input writes gated editor_control request and validates inputs", async () => {
+test("playtest input fails closed until the addon exposes trusted live authorization", async () => {
+  {
+    const config = await makeConfig();
+    const handlers = createToolHandlers(config);
+    const result = await handlers["godot.playtest_input"]({ type: "action_press", action: "jump" });
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_runtime_approval_unavailable");
+    assert.equal((await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => [])).length, 0);
+    return;
+  }
   const config = await makeConfig();
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
@@ -1230,7 +1241,7 @@ test("playtest input writes gated editor_control request and validates inputs", 
       { type: "mouse_button", buttonIndex: 1, pressed: true, position: { x: 10, y: 20 } },
     ],
     reason: "tools-test",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1269,7 +1280,19 @@ test("playtest input writes gated editor_control request and validates inputs", 
   assert.equal((tooMany.structuredContent?.error as { code?: string })?.code, "too_many_playtest_input_steps");
 });
 
-test("playtest scenario writes bounded editor_control request and validates contract", async () => {
+test("playtest scenario fails closed until the addon exposes trusted live authorization", async () => {
+  {
+    const config = await makeConfig();
+    const handlers = createToolHandlers(config);
+    const result = await handlers["godot.run_playtest_scenario"]({
+      scenePath: "res://scenes/playtest.tscn",
+      steps: [{ type: "wait_seconds", seconds: 0.1 }],
+    });
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_runtime_approval_unavailable");
+    assert.equal((await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => [])).length, 0);
+    return;
+  }
   const config = await makeConfig();
   await fs.mkdir(path.join(config.projectRoot, "scenes"), { recursive: true });
   await fs.writeFile(path.join(config.projectRoot, "scenes", "playtest.tscn"), "[gd_scene format=3]\n", "utf8");
@@ -1365,62 +1388,48 @@ test("playtest scenario writes bounded editor_control request and validates cont
   assert.equal((badTimeline.structuredContent?.error as { code?: string })?.code, "invalid_playtest_timeline_frame_count");
 });
 
-test("save scene tools write editor_control requests", async () => {
+test("save scene tools fail closed without trusted state-bound approval receipts", async () => {
   const config = await makeConfig();
-  await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const savePending = handlers["godot.save_scene"]({ timeoutMs: 1_000 });
-  let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
-  let request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
-    request_id: string;
-    type: string;
-    payload: { action?: unknown; params?: Record<string, unknown>; reason?: unknown };
-  };
-  assert.equal(request.type, "editor_control");
-  assert.equal(request.payload.action, "save_scene");
-  await writeAddonResponse(config.bridgeDir, request.request_id, {
-    status: "succeeded",
-    data: {
-      action: "save_scene",
-      saved: true,
-      save_state: {
-        status: "saved_to_disk",
-        save_scope: "current_scene",
-        target_scene: "res://scenes/main.tscn",
-      },
-    },
-  });
-  const saveResult = await savePending;
-  assert.equal(saveResult.isError, false);
-  const saveResponse = saveResult.structuredContent?.response as {
-    data?: {
-      save_state?: { status?: string };
-      post_save_check?: { check_kind?: string; status?: string; validation_status?: string };
-      post_save_check_passed?: boolean;
-    };
-  } | undefined;
-  assert.equal(saveResponse?.data?.save_state?.status, "saved_to_disk");
-  assert.equal(saveResponse?.data?.post_save_check?.check_kind, "godot_headless_check_only");
-  assert.equal(saveResponse?.data?.post_save_check?.status, "invalid_request");
-  assert.equal(saveResponse?.data?.post_save_check?.validation_status, "not_run");
-  assert.equal(saveResponse?.data?.post_save_check_passed, false);
-  assert.equal(saveResult.structuredContent?.post_save_check_passed, false);
+  const saveResult = await handlers["godot.save_scene"]({ timeoutMs: ADDON_TEST_TIMEOUT_MS });
+  assert.equal(saveResult.isError, true);
+  assert.equal((saveResult.structuredContent?.error as { code?: string })?.code, "trusted_scene_save_approval_unavailable");
 
-  const saveAllPending = handlers["godot.save_all_scenes"]({ timeoutMs: 1_000 });
-  requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
-  request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
-    request_id: string;
-    type: string;
-    payload: { action?: unknown; params?: Record<string, unknown> };
-  };
-  assert.equal(request.type, "editor_control");
-  assert.equal(request.payload.action, "save_all_scenes");
-  await writeAddonResponse(config.bridgeDir, request.request_id, {
-    status: "succeeded",
-    data: { action: "save_all_scenes", saved: true },
+  const saveAllResult = await handlers["godot.save_all_scenes"]({ timeoutMs: ADDON_TEST_TIMEOUT_MS });
+  assert.equal(saveAllResult.isError, true);
+  assert.equal((saveAllResult.structuredContent?.error as { code?: string })?.code, "trusted_scene_save_approval_unavailable");
+
+  const requestsDir = path.join(config.bridgeDir, "requests");
+  const requests = await fs.readdir(requestsDir).catch(() => []);
+  assert.deepEqual(requests, []);
+});
+
+test("direct MCP test-scene execution fails closed without live runtime authorization", async () => {
+  const config = await makeConfig();
+  const handlers = createToolHandlers(config);
+
+  const result = await handlers["godot.run_test_scene"]({ scenePath: "res://scenes/test_3d.tscn" });
+
+  assert.equal(result.isError, true);
+  assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_runtime_approval_unavailable");
+  const requests = await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => []);
+  assert.deepEqual(requests, []);
+});
+
+test("selected-node fixes fail closed without trusted state-bound approval receipts", async () => {
+  const config = await makeConfig();
+  const handlers = createToolHandlers(config);
+
+  const result = await handlers["godot.fix_selected_node"]({
+    fixCode: "unhide_node",
+    approvalToken: "APPROVE_GODOT_CODEX_BRIDGE_FIX_SELECTED_NODE",
   });
-  assert.equal((await saveAllPending).isError, false);
+
+  assert.equal(result.isError, true);
+  assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_node_fix_approval_unavailable");
+  const requests = await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => []);
+  assert.deepEqual(requests, []);
 });
 
 test("on-demand introspection tools write editor_control requests and validate inputs", async () => {
@@ -1433,7 +1442,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     depth: 3,
     maxNodes: 48,
     includeProperties: false,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   let request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1458,7 +1467,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     nodePath: "House",
     maxNodes: 12,
     groundY: -1.5,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1482,7 +1491,7 @@ test("on-demand introspection tools write editor_control requests and validate i
   const groupBoundsPending = handlers["godot.get_spatial_bounds"]({
     groupName: "buildings",
     selectedOnly: false,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1505,7 +1514,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     groupName: "buildings",
     tolerance: 0.05,
     maxNodes: 12,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1531,7 +1540,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     query: "aabb_overlap",
     selectedOnly: true,
     maxPairs: 9,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1559,7 +1568,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     maxNodes: 12,
     maxPairs: 9,
     maxIssues: 32,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1593,7 +1602,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     gridOrigin: { x: 0, z: 0 },
     alignToSurface: true,
     maxNodes: 12,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1639,7 +1648,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     gridOrigin: { x: 0, y: 1, z: 0 },
     axes: ["x", "z"],
     captureScreenshot: false,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1666,7 +1675,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     extensions: ["tscn"],
     typeFilter: "PackedScene",
     limit: 25,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1694,7 +1703,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     placeableOnly: true,
     includeDependencies: true,
     limit: 10,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1719,7 +1728,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     className: "Node3D",
     noInheritance: true,
     limit: 12,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1744,7 +1753,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     includeEmpty: true,
     maxNodes: 10,
     maxSlots: 20,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1770,7 +1779,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     includeEnvironmentProperties: false,
     includeParticles: true,
     maxNodes: 12,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1795,7 +1804,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     property: "glow_enabled",
     value: true,
     createIfMissing: true,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1822,7 +1831,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     lifetime: 1.25,
     position: { x: 0, y: 1, z: 0 },
     color: { r: 1, g: 0.7, b: 0.25, a: 1 },
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -1852,7 +1861,7 @@ test("on-demand introspection tools write editor_control requests and validate i
     drawMesh: "unchanged",
     drawSize: 0.5,
     color: { r: 0.3, g: 0.8, b: 1, a: 1 },
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2009,7 +2018,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     nodePath: "MeshInstance3D",
     property: "material_override",
     resourcePath: "res://materials/test_material.tres",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   t.mock.restoreAll();
@@ -2036,7 +2045,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     property: "mesh",
     resourceClass: "BoxMesh",
     changes: [{ property: "size", value: { x: 1, y: 2, z: 3 } }],
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2060,7 +2069,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     nodePath: "MeshInstance3D",
     property: "material_override",
     changes: [{ property: "albedo_color", value: { r: 0.2, g: 0.8, b: 1, a: 1 } }],
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2084,7 +2093,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     slotKind: "geometry_material_override",
     parameter: "glow_strength",
     value: 0.75,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2109,7 +2118,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     slotKind: "geometry_material_override",
     shaderPath: "res://shaders/glow.gdshader",
     parameters: { glow_strength: 0.5 },
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2134,7 +2143,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     slotKind: "geometry_material_override",
     parameter: "detail_texture",
     texturePath: "res://textures/checker.svg",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2158,7 +2167,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     nodePath: "MeshInstance3D",
     property: "material_override",
     clear: true,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2257,7 +2266,7 @@ test("resource lifecycle tools write editor_control requests and validate inputs
     slotKind: "geometry_material_override",
     parameter: "detail_texture",
     clear: true,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2284,7 +2293,7 @@ test("animation tools write editor_control requests and validate inputs", async 
   const listPending = handlers["godot.list_animation_players"]({
     maxPlayers: 12,
     includeEmpty: false,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   let request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2309,7 +2318,7 @@ test("animation tools write editor_control requests and validate inputs", async 
     includeKeys: true,
     maxTracks: 8,
     maxKeysPerTrack: 4,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2334,7 +2343,7 @@ test("animation tools write editor_control requests and validate inputs", async 
     animationName: "float",
     mode: "seek",
     position: 0.5,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2357,7 +2366,7 @@ test("animation tools write editor_control requests and validate inputs", async 
   const stopPending = handlers["godot.stop_animation_preview"]({
     nodePath: "AnimationPlayer",
     keepState: false,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2390,7 +2399,7 @@ test("animation tools write editor_control requests and validate inputs", async 
         ],
       },
     ],
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2448,7 +2457,7 @@ test("node lifecycle and signal tools write editor_control requests", async () =
     parentPath: ".",
     className: "Node3D",
     name: "Marker",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   let request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2471,7 +2480,7 @@ test("node lifecycle and signal tools write editor_control requests", async () =
   const renamePending = handlers["godot.rename_node"]({
     nodePath: "Marker",
     newName: "MarkerRenamed",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2493,7 +2502,7 @@ test("node lifecycle and signal tools write editor_control requests", async () =
     scenePath: "res://scenes/tree.tscn",
     parentPath: ".",
     name: "TreeInstance",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2521,7 +2530,7 @@ test("node lifecycle and signal tools write editor_control requests", async () =
     scale: { x: 1, y: 1, z: 1 },
     createCollider: true,
     materialColor: { r: 0.2, g: 0.4, b: 0.8, a: 1 },
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForEditorControlAction(path.join(config.bridgeDir, "requests"), "place_asset_in_scene", request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2571,7 +2580,7 @@ test("node lifecycle and signal tools write editor_control requests", async () =
     parentPath: ".",
     name: "TreePreview",
     captureScreenshot: false,
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForEditorControlAction(path.join(config.bridgeDir, "requests"), "place_asset_in_scene", request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2594,7 +2603,7 @@ test("node lifecycle and signal tools write editor_control requests", async () =
     signalName: "pressed",
     targetNodePath: ".",
     methodName: "_on_button_pressed",
-    timeoutMs: 1_000,
+    timeoutMs: ADDON_TEST_TIMEOUT_MS,
   });
   requestPath = await waitForEditorControlAction(path.join(config.bridgeDir, "requests"), "connect_signal", request.request_id);
   request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
@@ -2631,7 +2640,7 @@ test("bridge notes append writes editor_control request", async () => {
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const pending = handlers["godot.notes_append"]({ text: "Remember current camera framing.", timeoutMs: 1_000 });
+  const pending = handlers["godot.notes_append"]({ text: "Remember current camera framing.", timeoutMs: ADDON_TEST_TIMEOUT_MS });
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
     request_id: string;
@@ -2735,7 +2744,7 @@ async function waitForEditorControlAction(requestsDir: string, action: string, p
 
 async function writeAddonResponse(bridgeDir: string, requestId: string, response: Record<string, unknown>): Promise<void> {
   await fs.mkdir(path.join(bridgeDir, "responses"), { recursive: true });
-  await fs.writeFile(path.join(bridgeDir, "responses", `${requestId}.json`), JSON.stringify(response), "utf8");
+  await fs.writeFile(path.join(bridgeDir, "responses", `${requestId}.json`), JSON.stringify({ ...response, request_id: requestId }), "utf8");
 }
 
 async function writeLiveHeartbeat(bridgeDir: string): Promise<void> {

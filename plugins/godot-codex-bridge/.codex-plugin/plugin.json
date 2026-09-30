@@ -1,0 +1,18 @@
+{
+  "name": "godot-codex-bridge",
+  "version": "0.1.0+codex.20260929160810",
+  "description": "Set up bounded Godot project context and guided editor integration for Codex.",
+  "author": {
+    "name": "Godot Codex Bridge contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Godot Codex Bridge",
+    "shortDescription": "Connect Codex to a local Godot game.",
+    "longDescription": "Guides a previewed addon install and project-scoped MCP setup so Codex can inspect a Godot game with bounded tools.",
+    "developerName": "Godot Codex Bridge contributors",
+    "category": "Development",
+    "capabilities": [],
+    "defaultPrompt": "Set up Godot Codex Bridge for this Godot project and show me its scene context."
+  }
+}

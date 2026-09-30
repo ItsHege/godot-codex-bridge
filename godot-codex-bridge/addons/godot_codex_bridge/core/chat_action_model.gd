@@ -562,13 +562,8 @@ static func auto_enable_tools_request(connection_state: String, tools_available:
 		return {"send": false, "reason": "already_requested"}
 	if tools_available and not force:
 		return {"send": false, "reason": "tools_available"}
-	return {
-		"send": true,
-		"method": "bridge.tools.enable",
-		"params": {},
-		"mark_requested": true,
-		"message": "Refreshing Godot Bridge tools for this project..." if force else "Enabling Godot Bridge tools for this Codex runtime...",
-	}
+	# Registration changes Codex configuration. Connection alone is not consent.
+	return {"send": false, "reason": "explicit_enable_required"}
 
 
 static func auto_enable_tools_effect_plan(auto_enable: Dictionary) -> Dictionary:

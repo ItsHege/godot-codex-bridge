@@ -28,17 +28,25 @@ function Convert-JsonTextToHashtable([string] $Text) {
   return $result
 }
 
-function Get-AddonDigest([string] $AddonRoot) {
+function Get-AddonDigest([string] $AddonRoot, [switch] $Legacy) {
   $root = [System.IO.Path]::GetFullPath($AddonRoot).TrimEnd("\")
-  $entries = foreach ($file in (Get-ChildItem -LiteralPath $root -Recurse -File | Sort-Object FullName)) {
+  $files = Get-ChildItem -LiteralPath $root -Recurse -File
+  # Legacy: culture-aware Sort-Object, which orders differently in Windows
+  # PowerShell 5.1 and PowerShell 7. Kept only to recognise installs recorded
+  # before ordinal ordering; never used for new builds.
+  if ($Legacy) { $files = $files | Sort-Object FullName }
+  $entries = New-Object System.Collections.Generic.List[string]
+  foreach ($file in $files) {
     $relative = $file.FullName.Substring($root.Length).TrimStart("\").Replace("\", "/")
     if ($relative -in @("host_config.json", "install_manifest.json") -or $relative.EndsWith(".uid", [System.StringComparison]::OrdinalIgnoreCase)) {
       continue
     }
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
-    "$relative`:$hash"
+    $entries.Add("$relative`:$hash")
   }
-  $payload = [System.Text.Encoding]::UTF8.GetBytes(($entries -join "`n"))
+  $ordered = $entries.ToArray()
+  if (-not $Legacy) { [System.Array]::Sort($ordered, [System.StringComparer]::Ordinal) }
+  $payload = [System.Text.Encoding]::UTF8.GetBytes(($ordered -join "`n"))
   $sha = [System.Security.Cryptography.SHA256]::Create()
   try {
     return "sha256:" + ([System.BitConverter]::ToString($sha.ComputeHash($payload))).Replace("-", "").ToLowerInvariant()
@@ -81,6 +89,12 @@ function Get-ProjectStatus([string] $Root, [hashtable] $Channel) {
   $installedChannel = if ($installed.Count -gt 0) { [string]$installed["channel"] } else { "unmanaged" }
   $availableBuild = if ($Channel.Count -gt 0) { [string]$Channel["build_id"] } else { "" }
   $actualBuild = if (Test-Path -LiteralPath $installedAddon) { Get-AddonDigest $installedAddon } else { "" }
+  if ($installedBuild -ne "" -and $installedBuild -ne $actualBuild -and (Test-Path -LiteralPath $installedAddon)) {
+    # An install recorded with the legacy ordering is still unmodified if the
+    # legacy digest matches.
+    $legacyBuild = Get-AddonDigest $installedAddon -Legacy
+    if ($legacyBuild -eq $installedBuild) { $actualBuild = $installedBuild }
+  }
   $state = if (-not (Test-Path -LiteralPath $projectFile)) {
     "wrong_project_root"
   } elseif ($installed.Count -eq 0) {
@@ -167,6 +181,7 @@ if ($Action -eq "Status") {
     channel_manifest_path = $channelPath
     channel_published = $channelData.Count -gt 0
     channel = $channelData
+    source_build_id = Get-AddonDigest $sourceAddon
     registry_path = $registryPath
     projects = @($roots | ForEach-Object { Get-ProjectStatus $_ $channelData })
   } | ConvertTo-Json -Depth 8

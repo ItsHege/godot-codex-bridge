@@ -11,79 +11,11 @@ func _init(context: BridgeContext = null) -> void:
 
 
 func save_scene(_params: Dictionary) -> Dictionary:
-	if not _permission_enabled("allow_scene_save"):
-		return _err("permission_denied", "Scene save permission is disabled in the Codex Bridge dock.")
-
-	var scene_root := EditorInterface.get_edited_scene_root()
-	if scene_root == null:
-		return _err("no_current_scene", "No edited scene is open.")
-
-	var scene_path := scene_root.scene_file_path
-	var result_code := EditorInterface.save_scene()
-	var result_name := error_string(result_code)
-	if result_code != OK:
-		return {
-			"ok": false,
-			"error": _error_payload("scene_save_failed", "Godot failed to save the current scene: " + result_name, {
-				"result_code": result_code,
-				"result_name": result_name,
-				"scene_path": scene_path,
-			}),
-		}
-
-	var snapshot := _refresh("editor_control:save_scene")
-	var current_scene := current_scene_payload(EditorInterface.get_edited_scene_root())
-	var open_scenes := open_scene_paths_payload(EditorInterface.get_open_scenes())
-	var save_state := save_state_payload(
-		"current_scene",
-		scene_path,
-		open_scenes,
-		current_scene,
-		result_code,
-		result_name,
-		snapshot,
-		true
-	)
-	var data := {
-		"saved": true,
-		"changed": true,
-		"save_scope": "current_scene",
-		"scene_path": scene_path,
-		"current_scene": current_scene,
-		"open_scenes": open_scenes,
-		"save_state": save_state,
-		"result_code": result_code,
-		"result_name": result_name,
-		"snapshot_refreshed": true,
-		"generated_at": snapshot.get("generated_at", ""),
-	}
-	_log("editor_scene_saved", data)
-	return _ok(data)
+	return _err("trusted_scene_save_approval_unavailable", "Bridge-request scene saving is disabled until an exact, short-lived, single-use human approval receipt is available. Save from the Godot editor UI.")
 
 
 func save_all_scenes(_params: Dictionary) -> Dictionary:
-	if not _permission_enabled("allow_scene_save"):
-		return _err("permission_denied", "Scene save permission is disabled in the Codex Bridge dock.")
-
-	var before_open_scenes := open_scene_paths_payload(EditorInterface.get_open_scenes())
-	EditorInterface.save_all_scenes()
-	var snapshot := _refresh("editor_control:save_all_scenes")
-	var current_scene := current_scene_payload(EditorInterface.get_edited_scene_root())
-	var open_scenes := open_scene_paths_payload(EditorInterface.get_open_scenes())
-	var save_state := save_all_state_payload(before_open_scenes, open_scenes, current_scene, snapshot)
-	var data := {
-		"saved": true,
-		"changed": true,
-		"save_scope": "all_open_scenes",
-		"open_scenes_before": before_open_scenes,
-		"open_scenes": open_scenes,
-		"current_scene": current_scene,
-		"save_state": save_state,
-		"snapshot_refreshed": true,
-		"generated_at": snapshot.get("generated_at", ""),
-	}
-	_log("editor_all_scenes_saved", data)
-	return _ok(data)
+	return _err("trusted_scene_save_approval_unavailable", "Bridge-request save-all is disabled until exact, short-lived, single-use human approval receipts are available for every dirty scene. Save from the Godot editor UI.")
 
 
 static func current_scene_payload(scene_root: Node) -> Dictionary:

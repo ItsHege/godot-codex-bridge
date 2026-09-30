@@ -6,9 +6,14 @@ param(
 
   [string] $ChannelManifest = "",
 
+  [string] $ExpectedProjectFileSha256 = "",
+
   [switch] $Apply,
   [switch] $Replace,
+  [switch] $EnablePlugin,
   [switch] $SimulateFailureAfterBackupForTest,
+  [switch] $SimulateFailureAfterProjectEditForTest,
+  [switch] $SimulateProjectFileChangeBeforeWriteForTest,
 
   [int] $HostPort = 49390,
 
@@ -171,6 +176,71 @@ function Assert-NoReparseTree([string] $RootPath) {
   }
 }
 
+function Assert-NoReparseAncestors([string] $PathValue) {
+  $current = [System.IO.Path]::GetFullPath($PathValue)
+  while (-not [string]::IsNullOrWhiteSpace($current)) {
+    if (Test-Path -LiteralPath $current) {
+      $item = Get-Item -LiteralPath $current -Force
+      if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing addon install through reparse point: $current"
+      }
+    }
+    $parent = Split-Path -Parent $current
+    if ($parent -eq $current -or [string]::IsNullOrWhiteSpace($parent)) { break }
+    $current = $parent
+  }
+}
+
+function Get-ProjectTextWithPluginEnabled([string] $ProjectText) {
+  $pluginPath = "res://addons/godot_codex_bridge/plugin.cfg"
+  $newline = if ($ProjectText.Contains("`r`n")) { "`r`n" } else { "`n" }
+  $sectionPattern = '(?m)^\[editor_plugins\][ \t]*\r?$'
+  $sections = [regex]::Matches($ProjectText, $sectionPattern)
+  if ($sections.Count -gt 1) {
+    throw "Cannot enable plugin automatically: project.godot has multiple editor_plugins sections."
+  }
+  if ($sections.Count -eq 0) {
+    return $ProjectText.TrimEnd("`r", "`n") + $newline + $newline + "[editor_plugins]" + $newline + 'enabled=PackedStringArray("' + $pluginPath + '")' + $newline
+  }
+
+  $start = $sections[0].Index + $sections[0].Length
+  $nextSection = [regex]::Match($ProjectText.Substring($start), '(?m)^\[[^\]\r\n]+\][ \t]*\r?$')
+  $end = if ($nextSection.Success) { $start + $nextSection.Index } else { $ProjectText.Length }
+  $body = $ProjectText.Substring($start, $end - $start)
+  $enabledMatches = [regex]::Matches($body, '(?m)^[ \t]*enabled[ \t]*=[ \t]*(.*)$')
+  if ($enabledMatches.Count -gt 1) {
+    throw "Cannot enable plugin automatically: editor_plugins has multiple enabled entries."
+  }
+  if ($enabledMatches.Count -eq 0) {
+    $prefix = if ($end -gt 0 -and $ProjectText[$end - 1] -ne "`n") { $newline } else { "" }
+    return $ProjectText.Insert($end, $prefix + 'enabled=PackedStringArray("' + $pluginPath + '")' + $newline + $newline)
+  }
+
+  $value = $enabledMatches[0].Groups[1].Value.Trim()
+  $arrayMatch = [regex]::Match($value, '^PackedStringArray\((.*)\)[ \t]*$')
+  if (-not $arrayMatch.Success) {
+    throw "Cannot enable plugin automatically: unsupported editor_plugins.enabled format. Enable it in Godot instead."
+  }
+  $items = $arrayMatch.Groups[1].Value.Trim()
+  if ($items -ne '' -and -not [regex]::IsMatch($items, '^"[^"\r\n]*"(?:[ \t]*,[ \t]*"[^"\r\n]*")*$')) {
+    throw "Cannot enable plugin automatically: editor_plugins.enabled contains unsupported values. Enable it in Godot instead."
+  }
+  if ([regex]::IsMatch($items, '(^|[ \t]*,[ \t]*)"' + [regex]::Escape($pluginPath) + '"($|[ \t]*,)')) {
+    return $ProjectText
+  }
+  $replacement = if ($items -eq '') { 'enabled=PackedStringArray("' + $pluginPath + '")' } else { 'enabled=PackedStringArray(' + $items + ', "' + $pluginPath + '")' }
+  $match = $enabledMatches[0]
+  return $ProjectText.Substring(0, $start + $match.Index) + $replacement + $ProjectText.Substring($start + $match.Index + $match.Length)
+}
+
+function Get-EnabledEntry([string] $ProjectText) {
+  $section = [regex]::Match($ProjectText, '(?ms)^\[editor_plugins\][ \t]*\r?\n(.*?)(?=^\[[^\]\r\n]+\]|\z)')
+  if (-not $section.Success) { return $null }
+  $entry = [regex]::Match($section.Groups[1].Value, '(?m)^[ \t]*enabled[ \t]*=.*$')
+  if (-not $entry.Success) { return $null }
+  return $entry.Value.TrimEnd("`r")
+}
+
 $productRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 $productRootPath = $productRoot.Path
 $hostRoot = Join-Path $productRootPath "codex_host"
@@ -203,17 +273,60 @@ $bridgeDir = Join-Path $resolvedProjectRoot ".godot\godot_codex_bridge"
 $heartbeatPath = Join-Path $bridgeDir "heartbeat.json"
 $snapshotPath = Join-Path $bridgeDir "context_snapshot.json"
 
+Assert-NoReparseAncestors $resolvedProjectRoot
+if (Test-Path -LiteralPath $resolvedProjectRoot) {
+  Assert-NoReparsePoint $resolvedProjectRoot $resolvedProjectRoot
+  Assert-NoReparsePoint $targetAddon $resolvedProjectRoot
+  if (Test-Path -LiteralPath $targetAddon) { Assert-NoReparseTree $targetAddon }
+}
+if (Test-Path -LiteralPath $resolvedSourceAddon) { Assert-NoReparseTree $resolvedSourceAddon }
+if ($EnablePlugin -and (Test-Path -LiteralPath $projectFile)) {
+  Assert-NoReparsePoint $projectFile $resolvedProjectRoot
+}
+
 $projectExists = Test-Path -LiteralPath $projectFile
 $sourceExists = (Test-Path -LiteralPath $sourcePluginCfg) -and (Test-Path -LiteralPath $sourcePluginGd)
 $targetExists = Test-Path -LiteralPath $targetPluginCfg
 $targetHostConfigExists = Test-Path -LiteralPath $targetHostConfig
 $projectText = if ($projectExists) { Get-Content -Raw -LiteralPath $projectFile } else { "" }
-$pluginEnabled = if ($projectExists) { $projectText.Contains("res://addons/godot_codex_bridge/plugin.cfg") } else { $null }
+$projectFileSha256 = if ($projectExists) { Get-Sha256Hex $projectFile } else { $null }
+if ($ExpectedProjectFileSha256 -ne "") {
+  if (-not [regex]::IsMatch($ExpectedProjectFileSha256, '^[0-9a-fA-F]{64}$')) {
+    throw "ExpectedProjectFileSha256 must be a 64-character SHA-256 hex value."
+  }
+  if ($projectFileSha256 -ne $ExpectedProjectFileSha256.ToUpperInvariant()) {
+    throw "project.godot changed since the reviewed preview; run the dry-run again."
+  }
+}
+$previousEnabledEntry = if ($projectExists) { Get-EnabledEntry $projectText } else { $null }
+$pluginEnabled = if ($projectExists) {
+  $previousEnabledEntry -ne $null -and $previousEnabledEntry.Contains('"res://addons/godot_codex_bridge/plugin.cfg"')
+} else { $null }
+$enabledProjectText = $null
+$projectFileChangePreview = [ordered]@{
+  requested = [bool]$EnablePlugin
+  action = "none"
+  path = $projectFile
+  sha256 = $projectFileSha256
+  previous_enabled_entry = $previousEnabledEntry
+  proposed_enabled_entry = $null
+}
+if ($EnablePlugin -and $projectExists -and -not $pluginEnabled) {
+  $enabledProjectText = Get-ProjectTextWithPluginEnabled $projectText
+  $projectFileChangePreview.action = "enable_plugin"
+  $projectFileChangePreview.proposed_enabled_entry = Get-EnabledEntry $enabledProjectText
+}
 $heartbeatAgeMs = Get-FileAgeMs $heartbeatPath
 $snapshotAgeMs = Get-FileAgeMs $snapshotPath
 $activeEditorDetected = ($heartbeatAgeMs -ne $null -and $heartbeatAgeMs -le 5000)
 $staleEditor = ($heartbeatAgeMs -ne $null -and $heartbeatAgeMs -gt 5000)
 $changePreview = if ($sourceExists) { Get-AddonChangePreview $resolvedSourceAddon $targetAddon } else { $null }
+$generatedFilePreview = [ordered]@{
+  host_config = $(if (Test-Path -LiteralPath $targetHostConfig) { "replace" } else { "add" })
+  install_manifest = $(if ($channelManifestData.Count -gt 0) {
+    if (Test-Path -LiteralPath $targetInstallManifest) { "replace" } else { "add" }
+  } elseif (Test-Path -LiteralPath $targetInstallManifest) { "remove_stale_channel_manifest" } else { "none" })
+}
 $targetInstallData = Read-JsonHashtable $targetInstallManifest
 $sourceChannel = if ($channelManifestData.Count -gt 0) { [string]$channelManifestData["channel"] } else { "stable" }
 $sourceBuildId = if ($channelManifestData.Count -gt 0) { [string]$channelManifestData["build_id"] } else { "" }
@@ -240,10 +353,10 @@ if (-not $projectExists) {
   $nextAction = "Run from the bridge repo or pass -SourceAddon pointing at a packaged addons\godot_codex_bridge folder."
 } elseif (-not $targetExists) {
   $readiness = "addon_not_installed"
-  $nextAction = "Run this helper with -Apply to copy the addon, then enable it in Godot Project Settings -> Plugins."
+  $nextAction = if ($EnablePlugin) { "Run this helper with -Apply -EnablePlugin to copy and enable the addon." } else { "Run this helper with -Apply to copy the addon, then enable it in Godot Project Settings -> Plugins." }
 } elseif ($pluginEnabled -eq $false) {
   $readiness = "addon_not_enabled"
-  $nextAction = "Open Godot and enable Godot Codex Bridge in Project Settings -> Plugins."
+  $nextAction = if ($EnablePlugin) { "Run this helper with -Apply -Replace -EnablePlugin after reviewing the addon diff." } else { "Open Godot and enable Godot Codex Bridge in Project Settings -> Plugins." }
 } elseif (-not $targetHostConfigExists) {
   $readiness = "host_config_missing"
   $nextAction = "Run this helper with -Apply -Replace to refresh the addon and generate addons\godot_codex_bridge\host_config.json."
@@ -267,6 +380,12 @@ if ($Apply) {
   }
   if (-not $sourceExists) {
     throw "Source addon is incomplete: $resolvedSourceAddon"
+  }
+  if ($EnablePlugin -and $activeEditorDetected) {
+    throw "Close the Godot editor before changing project.godot to enable the plugin."
+  }
+  if ($EnablePlugin) {
+    Assert-NoReparsePoint $projectFile $resolvedProjectRoot
   }
 
   $resolvedTargetAddon = [System.IO.Path]::GetFullPath($targetAddon)
@@ -306,7 +425,7 @@ if ($Apply) {
     node_entry = $nodeEntry
     port = $HostPort
     runtime = $HostRuntime
-    launch_mode = "local_hidden_process"
+    launch_mode = "manual_trusted_install"
     distribution = [ordered]@{
       channel = $sourceChannel
       build_id = $sourceBuildId
@@ -329,6 +448,9 @@ if ($Apply) {
   $targetExistedBefore = Test-Path -LiteralPath $targetAddon
   $originalMovedToBackup = $false
   $stagedAddonActivated = $false
+  $projectBackupPath = $null
+  $projectFileChanged = $false
+  $stagedProjectFile = $null
   try {
     Copy-Item -LiteralPath $resolvedSourceAddon -Destination $stagingPath -Recurse -Force
     if (Test-Path -LiteralPath $targetAddon) {
@@ -363,8 +485,41 @@ if ($Apply) {
     }
     Move-Item -LiteralPath $stagingPath -Destination $targetAddon
     $stagedAddonActivated = $true
+    if ($enabledProjectText -ne $null -and $enabledProjectText -ne $projectText) {
+      if ($SimulateProjectFileChangeBeforeWriteForTest) {
+        [System.IO.File]::AppendAllText($projectFile, "`n; simulated concurrent edit`n")
+      }
+      Assert-NoReparseAncestors $resolvedProjectRoot
+      Assert-NoReparsePoint $projectFile $resolvedProjectRoot
+      if ((Get-Sha256Hex $projectFile) -ne $projectFileSha256) {
+        throw "project.godot changed during addon installation; run the dry-run again."
+      }
+      New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+      $projectBackupPath = Join-Path $backupRoot ("project.godot." + $installId)
+      Copy-Item -LiteralPath $projectFile -Destination $projectBackupPath
+      if ((Get-Sha256Hex $projectBackupPath) -ne $projectFileSha256 -or (Get-Sha256Hex $projectFile) -ne $projectFileSha256) {
+        throw "project.godot changed during addon installation; run the dry-run again."
+      }
+      $stagedProjectFile = Join-Path $resolvedProjectRoot (".project.godot.install." + $installId)
+      Write-Utf8NoBom $stagedProjectFile $enabledProjectText
+      if ((Get-Sha256Hex $projectFile) -ne $projectFileSha256) {
+        throw "project.godot changed during addon installation; run the dry-run again."
+      }
+      Move-Item -LiteralPath $stagedProjectFile -Destination $projectFile -Force
+      $projectFileChanged = $true
+      if ($SimulateFailureAfterProjectEditForTest) {
+        throw "Simulated addon install failure after project.godot edit."
+      }
+    }
   } catch {
     $installError = $_
+    if ($projectFileChanged -and $projectBackupPath -ne $null -and (Test-Path -LiteralPath $projectBackupPath)) {
+      Copy-Item -LiteralPath $projectBackupPath -Destination $projectFile -Force
+      $projectFileChanged = $false
+    }
+    if ($stagedProjectFile -ne $null -and (Test-Path -LiteralPath $stagedProjectFile)) {
+      Remove-Item -LiteralPath $stagedProjectFile -Force
+    }
     if (
       (Test-Path -LiteralPath $targetAddon) -and
       ($originalMovedToBackup -or -not $targetExistedBefore)
@@ -394,6 +549,11 @@ if ($Apply) {
   $updateAvailable = $sourceBuildId -ne "" -and $sourceBuildId -ne $targetBuildId
   $checks.target_plugin_cfg_exists = $targetExists
   $checks.target_host_config_exists = $targetHostConfigExists
+  if ($projectFileChanged) {
+    $pluginEnabled = $true
+    $checks.plugin_enabled = $true
+    $projectFileChangePreview.action = "enabled_plugin"
+  }
 
   if ($pluginEnabled -eq $false) {
     $readiness = "addon_not_enabled"
@@ -428,7 +588,10 @@ if ($Apply) {
   update_available = $updateAvailable
   target_install_manifest_path = $targetInstallManifest
   change_preview = $changePreview
+  generated_file_preview = $generatedFilePreview
+  project_file_change_preview = $projectFileChangePreview
   backup_path = $backupPath
+  project_file_backup_path = $projectBackupPath
   rollback_performed = $rollbackPerformed
   host_port = $HostPort
   host_runtime = $HostRuntime

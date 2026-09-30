@@ -141,10 +141,10 @@ try {
 
   if ($visibleDisabled) {
     $reason = if ($Fast) { "skipped_by_fast" } else { "skipped_by_no_visible" }
-    Add-SkippedStep "chat_ux" "npm run validate:chat-ux" $reason
+    Add-SkippedStep "restricted_fixture" "npm run validate:restricted-fixture" $reason
   } else {
-    Invoke-ValidationStep "chat_ux" "npm run validate:chat-ux" {
-      & npm run validate:chat-ux
+    Invoke-ValidationStep "restricted_fixture" "npm run validate:restricted-fixture" {
+      & npm run validate:restricted-fixture
     } | Out-Null
   }
 

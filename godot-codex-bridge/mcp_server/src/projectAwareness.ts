@@ -1,18 +1,17 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { closeSync, createReadStream, readSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { promisify } from "node:util";
 
 import { isInsidePath } from "./config.js";
 import { isJsonObject } from "./bridge.js";
+import { assertPhysicalPathSync, openFileInsideRootSync, PhysicalPathError, readFileInsideRootBoundedSync, readFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject, JsonValue, ToolEnvelope } from "./types.js";
 
-const execFileAsync = promisify(execFile);
-
 const MAX_INDEX_FILES = 20_000;
+const MAX_INDEX_ENTRIES = 80_000;
+const MAX_INDEX_DIRECTORIES = 10_000;
 const MAX_INDEX_SKIPS = 100;
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
@@ -23,6 +22,12 @@ const MAX_READ_LINES = 1_000;
 const DEFAULT_READ_BYTES = 64_000;
 const MAX_READ_BYTES = 256_000;
 const MAX_TEXT_SEARCH_BYTES = 1_000_000;
+const MAX_SEARCH_INDEXED_FILES = 1_024;
+const MAX_SEARCH_INDEXED_ENTRIES = 2_048;
+const MAX_SEARCH_INDEXED_DIRECTORIES = 512;
+const MAX_SEARCH_INSPECTED_FILES = 256;
+const MAX_SEARCH_INSPECTED_BYTES = 4 * 1024 * 1024;
+const MAX_SEARCH_ELAPSED_MS = 5_000;
 const MAX_TEXT_SHA_BYTES = 64_000;
 const MAX_SCENE_PARSE_BYTES = 512_000;
 const MAX_SCENE_NODES = 1_000;
@@ -158,7 +163,10 @@ interface ProjectIndex {
   files: IndexedFile[];
   rootPath: string;
   truncated: boolean;
+  truncationReason: string | null;
   scannedFiles: number;
+  traversedEntries: number;
+  traversedDirectories: number;
   skipped: JsonObject[];
 }
 
@@ -189,7 +197,7 @@ export async function getProjectOverview(
 ): Promise<ToolEnvelope> {
   try {
     const projectFile = path.join(projectRoot, "project.godot");
-    const projectText = await readTextIfExists(projectFile);
+    const projectText = await readTextIfExists(projectRoot, projectFile);
     const projectConfig = parseProjectConfig(projectText);
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
     const index = await buildProjectIndex(projectRoot);
@@ -240,7 +248,7 @@ export async function getProjectMap(
 ): Promise<ToolEnvelope> {
   try {
     const projectFile = path.join(projectRoot, "project.godot");
-    const projectText = await readTextIfExists(projectFile);
+    const projectText = await readTextIfExists(projectRoot, projectFile);
     const projectConfig = parseProjectConfig(projectText);
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
     const index = await buildProjectIndex(projectRoot);
@@ -250,7 +258,7 @@ export async function getProjectMap(
       file.extension !== ".import" && ["resource", "image", "audio", "shader", "unknown"].includes(file.kind)
     );
     const sceneEntries = await Promise.all(scenes.slice(0, MAX_PROJECT_MAP_SCENES).map((file) => sceneMapEntry(projectRoot, file)));
-    const scriptEntries = await Promise.all(scripts.slice(0, MAX_PROJECT_MAP_SCRIPTS).map(scriptMapEntry));
+    const scriptEntries = await Promise.all(scripts.slice(0, MAX_PROJECT_MAP_SCRIPTS).map((file) => scriptMapEntry(projectRoot, file)));
     const groups = collectProjectGroups(sceneEntries).slice(0, MAX_PROJECT_MAP_GROUPS);
     const signals = collectProjectSignals(scriptEntries).slice(0, MAX_PROJECT_MAP_SIGNALS);
     const projectAutoloads = projectConfig.autoloads;
@@ -435,7 +443,7 @@ export async function getProjectSceneGraph(projectRoot: string, options: JsonObj
 export async function getProjectScriptMap(projectRoot: string, options: JsonObject = {}): Promise<ToolEnvelope> {
   try {
     const projectFile = path.join(projectRoot, "project.godot");
-    const projectText = await readTextIfExists(projectFile);
+    const projectText = await readTextIfExists(projectRoot, projectFile);
     const projectConfig = parseProjectConfig(projectText);
     const focusedScript = typeof options.scriptPath === "string" && options.scriptPath.trim() !== ""
       ? resolveProjectPath(projectRoot, options.scriptPath)
@@ -456,9 +464,9 @@ export async function getProjectScriptMap(projectRoot: string, options: JsonObje
       ? index.files.filter((file) => file.relativePath === focusedScript.relativePath)
       : index.files.filter((file) => file.kind === "script");
     const scenes = index.files.filter((file) => file.kind === "scene");
-    const scriptEntries = await Promise.all(scripts.slice(0, maxScripts).map(scriptMapEntry));
+    const scriptEntries = await Promise.all(scripts.slice(0, maxScripts).map((file) => scriptMapEntry(projectRoot, file)));
     const autoloadScriptEntries = focusedScript
-      ? await Promise.all(index.files.filter((file) => file.kind === "script").slice(0, maxScripts).map(scriptMapEntry))
+      ? await Promise.all(index.files.filter((file) => file.kind === "script").slice(0, maxScripts).map((file) => scriptMapEntry(projectRoot, file)))
       : scriptEntries;
     const sceneEntries = includeUsages
       ? await Promise.all(scenes.slice(0, MAX_PROJECT_SCRIPT_MAP_SCENES).map((file) =>
@@ -470,7 +478,7 @@ export async function getProjectScriptMap(projectRoot: string, options: JsonObje
     const classDuplicates = duplicateClassesFromClassIndex(classItems);
     const autoloadItems = await autoloadScriptMap(projectRoot, projectConfig.autoloads, autoloadScriptEntries);
     const agents = await collectAgentsFiles(projectRoot, true);
-    const docs = await collectProjectDocPreviews(index);
+    const docs = await collectProjectDocPreviews(projectRoot, index);
 
     return {
       status: "ok",
@@ -568,7 +576,7 @@ export async function listProjectFiles(projectRoot: string, options: JsonObject 
     });
 
     const page = filtered.slice(offset, offset + limit);
-    const files = await Promise.all(page.map((file) => fileMetadataWithSmallSha(file)));
+    const files = await Promise.all(page.map((file) => fileMetadataWithSmallSha(projectRoot, file)));
 
     return {
       status: "ok",
@@ -609,19 +617,6 @@ export async function searchProjectFiles(projectRoot: string, options: JsonObjec
     const scope = rootPath ? resolveProjectPath(projectRoot, rootPath, { allowRoot: true }) : undefined;
     const globs = normalizeGlobList(options.globs);
 
-    const rg = await searchWithRipgrep(projectRoot, {
-      query,
-      scopePath: scope?.relativePath ?? "",
-      globs,
-      offset,
-      limit,
-      contextLines,
-      caseSensitive,
-    });
-    if (rg) {
-      return rg;
-    }
-
     return await searchWithNode(projectRoot, {
       query,
       scopePath: scope?.relativePath ?? "",
@@ -660,13 +655,13 @@ export async function readProjectFile(projectRoot: string, options: JsonObject =
     const startLine = boundedInt(options.startLine, 1, 1, Number.MAX_SAFE_INTEGER);
     const maxLines = boundedInt(options.maxLines, DEFAULT_READ_LINES, 1, MAX_READ_LINES);
     const maxBytes = boundedInt(options.maxBytes, DEFAULT_READ_BYTES, 1, MAX_READ_BYTES);
-    const read = await readBoundedLines(resolved.absolutePath, startLine, maxLines, maxBytes);
+    const read = await readBoundedLines(projectRoot, resolved.absolutePath, startLine, maxLines, maxBytes);
 
     return {
       status: "ok",
       awareness_version: "godot-codex-bridge/project-awareness-v1",
       project_root: projectRoot,
-      file: await fileMetadataWithSmallSha(metadata),
+      file: await fileMetadataWithSmallSha(projectRoot, metadata),
       metadata_only: false,
       readable_text: true,
       start_line: read.startLine,
@@ -714,7 +709,7 @@ export async function getSceneFileTree(
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
     const requestedScene = typeof options.scenePath === "string" && options.scenePath.trim() !== ""
       ? options.scenePath
-      : currentScenePath(snapshot) ?? parseProjectConfig(await readTextIfExists(path.join(projectRoot, "project.godot"))).mainScene;
+      : currentScenePath(snapshot) ?? parseProjectConfig(await readTextIfExists(projectRoot, path.join(projectRoot, "project.godot"))).mainScene;
 
     if (!requestedScene) {
       return {
@@ -740,7 +735,7 @@ export async function getCurrentSourceContext(
 ): Promise<ToolEnvelope> {
   try {
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
-    const projectConfig = parseProjectConfig(await readTextIfExists(path.join(projectRoot, "project.godot")));
+    const projectConfig = parseProjectConfig(await readTextIfExists(projectRoot, path.join(projectRoot, "project.godot")));
     const scenePath = currentScenePath(snapshot) ?? projectConfig.mainScene ?? null;
     const sceneTree = scenePath ? await parseSceneFile(projectRoot, scenePath) : null;
     const scripts = collectCurrentScriptPaths(snapshot, sceneTree);
@@ -816,38 +811,104 @@ function projectAwarenessErrorEnvelope(error: unknown): ToolEnvelope {
 
 async function buildProjectIndex(
   projectRoot: string,
-  options: { rootPath?: string; maxFiles?: number } = {},
+  options: {
+    rootPath?: string;
+    maxFiles?: number;
+    maxEntries?: number;
+    maxDirectories?: number;
+    deadlineAt?: number;
+  } = {},
 ): Promise<ProjectIndex> {
   const rootPath = options.rootPath ?? "";
   const rootAbsolutePath = rootPath ? path.resolve(projectRoot, pathFromRelative(rootPath)) : projectRoot;
   if (!isInsidePath(projectRoot, rootAbsolutePath)) {
     throw new ProjectAwarenessError("path_boundary_rejected", "Resolved path is outside the configured project root.");
   }
+  try {
+    assertPhysicalPathSync(projectRoot, rootAbsolutePath);
+  } catch (error) {
+    if (error instanceof PhysicalPathError) {
+      throw new ProjectAwarenessError(error.code, error.message, { path: rootPath });
+    }
+    throw error;
+  }
 
   const files: IndexedFile[] = [];
   const skipped: JsonObject[] = [];
   const maxFiles = options.maxFiles ?? MAX_INDEX_FILES;
+  const maxEntries = options.maxEntries ?? MAX_INDEX_ENTRIES;
+  const maxDirectories = options.maxDirectories ?? MAX_INDEX_DIRECTORIES;
   let scannedFiles = 0;
+  let traversedEntries = 0;
+  let traversedDirectories = 0;
   let truncated = false;
+  let truncationReason: string | null = null;
+
+  function stopIndexing(reason: string): void {
+    truncated = true;
+    if (!truncationReason) {
+      truncationReason = reason;
+    }
+  }
 
   async function walk(currentAbsolutePath: string): Promise<void> {
+    if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+      stopIndexing("project_index_elapsed_time_budget_reached");
+      return;
+    }
     if (files.length >= maxFiles) {
-      truncated = true;
+      stopIndexing("project_index_file_budget_reached");
+      return;
+    }
+    if (traversedDirectories >= maxDirectories) {
+      stopIndexing("project_index_directory_budget_reached");
+      return;
+    }
+    if (traversedEntries >= maxEntries) {
+      stopIndexing("project_index_entry_budget_reached");
       return;
     }
 
-    let entries;
+    let directory;
     try {
-      entries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
+      directory = await fs.opendir(currentAbsolutePath, { bufferSize: 32 });
     } catch (error) {
       pushSkip(skipped, currentAbsolutePath, "readdir_failed", error instanceof Error ? error.message : String(error));
       return;
     }
+    traversedDirectories += 1;
 
+    const entries = [];
+    try {
+      while (true) {
+        if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+          stopIndexing("project_index_elapsed_time_budget_reached");
+          break;
+        }
+        if (traversedEntries >= maxEntries) {
+          stopIndexing("project_index_entry_budget_reached");
+          break;
+        }
+        const entry = await directory.read();
+        if (!entry) {
+          break;
+        }
+        traversedEntries += 1;
+        entries.push(entry);
+      }
+    } catch (error) {
+      pushSkip(skipped, currentAbsolutePath, "readdir_failed", error instanceof Error ? error.message : String(error));
+    } finally {
+      await directory.close().catch(() => undefined);
+    }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
+      if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+        stopIndexing("project_index_elapsed_time_budget_reached");
+        return;
+      }
       if (files.length >= maxFiles) {
-        truncated = true;
+        stopIndexing("project_index_file_budget_reached");
         return;
       }
 
@@ -860,6 +921,10 @@ async function buildProjectIndex(
       }
 
       if (entry.isDirectory()) {
+        if (traversedEntries >= maxEntries) {
+          stopIndexing("project_index_entry_budget_reached");
+          continue;
+        }
         await walk(absolutePath);
         continue;
       }
@@ -882,13 +947,17 @@ async function buildProjectIndex(
     });
   }
   if (rootStat.isFile()) {
-    files.push(await indexedFileFromStat(projectRoot, rootPath, rootAbsolutePath, rootStat));
+    if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+      stopIndexing("project_index_elapsed_time_budget_reached");
+    } else {
+      files.push(await indexedFileFromStat(projectRoot, rootPath, rootAbsolutePath, rootStat));
+    }
   } else {
     await walk(rootAbsolutePath);
   }
 
   files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-  return { files, rootPath, truncated, scannedFiles, skipped };
+  return { files, rootPath, truncated, truncationReason, scannedFiles, traversedEntries, traversedDirectories, skipped };
 }
 
 async function indexedFileFromStat(
@@ -898,7 +967,7 @@ async function indexedFileFromStat(
   stat: { size: number; mtimeMs: number; mtime: Date },
 ): Promise<IndexedFile> {
   const extension = path.posix.extname(relativePath).toLowerCase();
-  const text = await classifyTextFile(absolutePath, extension, stat.size);
+  const text = await classifyTextFile(projectRoot, absolutePath, extension, stat.size);
   return {
     relativePath,
     resPath: `res://${relativePath}`,
@@ -916,6 +985,7 @@ async function indexedFileFromStat(
 }
 
 async function classifyTextFile(
+  projectRoot: string,
   absolutePath: string,
   extension: string,
   byteSize: number,
@@ -930,7 +1000,7 @@ async function classifyTextFile(
     return { isText: true, reason: null };
   }
 
-  const probe = await readFirstBytes(absolutePath, Math.min(TEXT_PROBE_BYTES, byteSize));
+  const probe = await readFirstBytes(projectRoot, absolutePath, Math.min(TEXT_PROBE_BYTES, byteSize));
   if (probe.includes(0)) {
     return { isText: false, reason: "nul_byte_probe" };
   }
@@ -940,14 +1010,14 @@ async function classifyTextFile(
   return { isText: true, reason: null };
 }
 
-async function readFirstBytes(absolutePath: string, byteCount: number): Promise<Buffer> {
-  const handle = await fs.open(absolutePath, "r");
+async function readFirstBytes(projectRoot: string, absolutePath: string, byteCount: number): Promise<Buffer> {
+  const descriptor = openFileInsideRootSync(projectRoot, absolutePath);
   try {
     const buffer = Buffer.alloc(byteCount);
-    const result = await handle.read(buffer, 0, byteCount, 0);
-    return buffer.subarray(0, result.bytesRead);
+    const bytesRead = readSync(descriptor, buffer, 0, byteCount, 0);
+    return buffer.subarray(0, bytesRead);
   } finally {
-    await handle.close();
+    closeSync(descriptor);
   }
 }
 
@@ -1023,6 +1093,14 @@ function resolveProjectPath(
   if (!isInsidePath(projectRoot, absolutePath)) {
     throw new ProjectAwarenessError("path_boundary_rejected", "Resolved path is outside the configured project root.");
   }
+  try {
+    assertPhysicalPathSync(projectRoot, absolutePath);
+  } catch (error) {
+    if (error instanceof PhysicalPathError) {
+      throw new ProjectAwarenessError(error.code, error.message, { path: normalized });
+    }
+    throw error;
+  }
 
   return {
     relativePath: normalized,
@@ -1062,7 +1140,28 @@ function blockedReasonFor(relativePath: string): { code: string; message: string
     };
   }
 
+  const fileName = segments[segments.length - 1]?.toLowerCase() ?? "";
+  if (isSecretFileName(fileName)) {
+    return {
+      code: "secret_path_rejected",
+      message: "Files that commonly hold secrets (env files, keys, keystores, credentials) are not readable through project awareness tools.",
+    };
+  }
+
   return null;
+}
+
+const SECRET_FILE_NAMES = new Set([".npmrc", ".pypirc", ".netrc", "auth.json", "export_credentials.cfg"]);
+const SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".secret", ".secrets"];
+
+/** Common secret-bearing file names; reads of these are never returned to the agent. */
+export function isSecretFileName(fileName: string): boolean {
+  const name = fileName.toLowerCase();
+  return name === ".env" || name.startsWith(".env.")
+    || SECRET_FILE_NAMES.has(name)
+    || SECRET_EXTENSIONS.some((extension) => name.endsWith(extension))
+    || /^id_(rsa|dsa|ecdsa|ed25519)(\.|$)/.test(name)
+    || /^(credentials|secrets?)(\.|$)/.test(name);
 }
 
 function blockedPathPolicy(): JsonObject {
@@ -1102,10 +1201,10 @@ function fileMetadata(file: IndexedFile): JsonObject {
   };
 }
 
-async function fileMetadataWithSmallSha(file: IndexedFile): Promise<JsonObject> {
+async function fileMetadataWithSmallSha(projectRoot: string, file: IndexedFile): Promise<JsonObject> {
   const metadata = fileMetadata(file);
   if (file.isText && file.byteSize <= MAX_TEXT_SHA_BYTES) {
-    const content = await fs.readFile(file.absolutePath);
+    const content = readFileInsideRootSync(projectRoot, file.absolutePath);
     metadata.sha256 = sha256Buffer(content);
   } else {
     metadata.sha256 = null;
@@ -1208,7 +1307,7 @@ async function sceneMapEntry(projectRoot: string, file: IndexedFile): Promise<Js
     };
   }
 
-  const content = await fs.readFile(file.absolutePath, "utf8");
+  const content = readFileInsideRootSync(projectRoot, file.absolutePath).toString("utf8");
   const parsed = parseTscn(content);
   return {
     ...base,
@@ -1257,7 +1356,7 @@ async function sceneDependencyEntry(projectRoot: string, file: IndexedFile, opti
     return { scene, edges, missingResources };
   }
 
-  const content = await fs.readFile(file.absolutePath, "utf8");
+  const content = readFileInsideRootSync(projectRoot, file.absolutePath).toString("utf8");
   const parsed = parseTscn(content);
   const sceneResPath = file.resPath;
   const externalResources = parsed.externalResources.slice(0, 200);
@@ -1374,7 +1473,7 @@ async function sceneDependencyEntry(projectRoot: string, file: IndexedFile, opti
   return { scene, edges, missingResources };
 }
 
-async function scriptMapEntry(file: IndexedFile): Promise<JsonObject> {
+async function scriptMapEntry(projectRoot: string, file: IndexedFile): Promise<JsonObject> {
   const base = fileMetadata(file);
   if (!file.isText || file.byteSize > MAX_PROJECT_MAP_SCRIPT_BYTES) {
     return {
@@ -1389,7 +1488,7 @@ async function scriptMapEntry(file: IndexedFile): Promise<JsonObject> {
     };
   }
 
-  const content = await fs.readFile(file.absolutePath, "utf8");
+  const content = readFileInsideRootSync(projectRoot, file.absolutePath).toString("utf8");
   const parsed = parseGdScriptSummary(content);
   return {
     ...base,
@@ -1713,7 +1812,7 @@ function filterScriptMapEntry(
   return filtered;
 }
 
-async function collectProjectDocPreviews(index: ProjectIndex): Promise<JsonObject[]> {
+async function collectProjectDocPreviews(projectRoot: string, index: ProjectIndex): Promise<JsonObject[]> {
   const candidates = index.files
     .filter((file) => file.kind === "doc" && file.isText)
     .filter((file) => path.posix.basename(file.relativePath).toLowerCase() !== "agents.md")
@@ -1721,8 +1820,9 @@ async function collectProjectDocPreviews(index: ProjectIndex): Promise<JsonObjec
     .slice(0, MAX_PROJECT_SCRIPT_MAP_DOCS);
   const docs: JsonObject[] = [];
   for (const file of candidates) {
-    const metadata = await fileMetadataWithSmallSha(file);
+    const metadata = await fileMetadataWithSmallSha(projectRoot, file);
     const preview = await readBoundedLines(
+      projectRoot,
       file.absolutePath,
       1,
       MAX_PROJECT_SCRIPT_MAP_DOC_PREVIEW_LINES,
@@ -1900,125 +2000,6 @@ function uniqueStrings(values: string[], limit: number): string[] {
   return [...new Set(values.filter((value) => value.trim() !== ""))].sort().slice(0, limit);
 }
 
-async function searchWithRipgrep(
-  projectRoot: string,
-  options: {
-    query: string;
-    scopePath: string;
-    globs: string[];
-    offset: number;
-    limit: number;
-    contextLines: number;
-    caseSensitive: boolean;
-  },
-): Promise<ToolEnvelope | null> {
-  if (process.env.GODOT_CODEX_BRIDGE_DISABLE_RG === "1") {
-    return null;
-  }
-
-  const args = [
-    "--json",
-    "--fixed-strings",
-    "--line-number",
-    "--column",
-    "--max-columns",
-    "400",
-    "--max-columns-preview",
-    "--context",
-    String(options.contextLines),
-    "--max-count",
-    String(Math.max(options.offset + options.limit + 1, options.limit)),
-  ];
-  if (!options.caseSensitive) {
-    args.push("--ignore-case");
-  }
-  for (const glob of BLOCKED_GLOBS) {
-    args.push("--glob", glob);
-  }
-  for (const glob of options.globs) {
-    args.push("--glob", glob);
-  }
-  args.push("--", options.query, options.scopePath || ".");
-
-  let stdout = "";
-  try {
-    const result = await execFileAsync("rg", args, {
-      cwd: projectRoot,
-      timeout: 5_000,
-      maxBuffer: 4 * 1024 * 1024,
-      windowsHide: true,
-    });
-    stdout = result.stdout;
-  } catch (error) {
-    if (isExecError(error) && error.code === 1) {
-      stdout = error.stdout ?? "";
-    } else {
-      return null;
-    }
-  }
-
-  const rawMatches: Array<{ relativePath: string; line: number; column: number; preview: string }> = [];
-  for (const rawLine of stdout.split(/\r?\n/)) {
-    if (!rawLine.trim()) {
-      continue;
-    }
-    let event;
-    try {
-      event = JSON.parse(rawLine) as JsonObject;
-    } catch {
-      continue;
-    }
-    if (event.type !== "match" || !isJsonObject(event.data)) {
-      continue;
-    }
-
-    const relativePath = rgPathText(event.data);
-    const lineNumber = Number(event.data.line_number);
-    const lines = isJsonObject(event.data.lines) ? event.data.lines : null;
-    const submatches = Array.isArray(event.data.submatches) ? event.data.submatches : [];
-    const firstSubmatch = isJsonObject(submatches[0]) ? submatches[0] : null;
-    const column = typeof firstSubmatch?.start === "number" ? firstSubmatch.start + 1 : 1;
-    if (!relativePath || !Number.isInteger(lineNumber)) {
-      continue;
-    }
-
-    let resolved;
-    try {
-      resolved = resolveProjectPath(projectRoot, relativePath);
-    } catch {
-      continue;
-    }
-    rawMatches.push({
-      relativePath: resolved.relativePath,
-      line: lineNumber,
-      column,
-      preview: truncateLine(typeof lines?.text === "string" ? lines.text : ""),
-    });
-  }
-
-  const page = rawMatches.slice(options.offset, options.offset + options.limit);
-  const matches = await Promise.all(page.map((match) => enrichSearchMatch(projectRoot, match, options.contextLines)));
-
-  return {
-    status: "ok",
-    awareness_version: "godot-codex-bridge/project-awareness-v1",
-    project_root: projectRoot,
-    search_engine: "ripgrep",
-    match_type: "literal",
-    query: options.query,
-    case_sensitive: options.caseSensitive,
-    offset: options.offset,
-    limit: options.limit,
-    context_lines: options.contextLines,
-    total_matching_at_least: rawMatches.length,
-    returned_count: matches.length,
-    truncated: options.offset + matches.length < rawMatches.length,
-    matches,
-    skipped: [],
-    excludes: blockedPathPolicy(),
-  };
-}
-
 async function searchWithNode(
   projectRoot: string,
   options: {
@@ -2031,14 +2012,24 @@ async function searchWithNode(
     caseSensitive: boolean;
   },
 ): Promise<ToolEnvelope> {
-  const index = await buildProjectIndex(projectRoot, { rootPath: options.scopePath });
+  const searchStartedAt = Date.now();
+  const index = await buildProjectIndex(projectRoot, {
+    rootPath: options.scopePath,
+    maxFiles: MAX_SEARCH_INDEXED_FILES,
+    maxEntries: MAX_SEARCH_INDEXED_ENTRIES,
+    maxDirectories: MAX_SEARCH_INDEXED_DIRECTORIES,
+    deadlineAt: searchStartedAt + MAX_SEARCH_ELAPSED_MS,
+  });
   const matches: JsonObject[] = [];
   const skipped = [...index.skipped];
   const needle = options.caseSensitive ? options.query : options.query.toLowerCase();
   let seenMatches = 0;
   let truncated = false;
+  let truncationReason: string | null = null;
+  let inspectedFileCount = 0;
+  let inspectedByteCount = 0;
 
-  for (const file of index.files) {
+  searchFiles: for (const file of index.files) {
     if (!file.isText || !matchesGlobs(file.relativePath, options.globs)) {
       continue;
     }
@@ -2046,10 +2037,59 @@ async function searchWithNode(
       pushSkip(skipped, file.relativePath, "search_file_too_large", `Search skips text files over ${MAX_TEXT_SEARCH_BYTES} bytes.`);
       continue;
     }
+    if (inspectedFileCount >= MAX_SEARCH_INSPECTED_FILES) {
+      truncated = true;
+      truncationReason = "search_inspected_file_budget_reached";
+      pushSkip(skipped, file.relativePath, truncationReason, `Search inspected at most ${MAX_SEARCH_INSPECTED_FILES} matching text files.`);
+      break;
+    }
+    if (inspectedByteCount + file.byteSize > MAX_SEARCH_INSPECTED_BYTES) {
+      truncated = true;
+      truncationReason = "search_inspected_byte_budget_reached";
+      pushSkip(skipped, file.relativePath, truncationReason, `Search inspected at most ${MAX_SEARCH_INSPECTED_BYTES} bytes of matching text files.`);
+      break;
+    }
+    if (Date.now() - searchStartedAt >= MAX_SEARCH_ELAPSED_MS) {
+      truncated = true;
+      truncationReason = "search_elapsed_time_budget_reached";
+      pushSkip(skipped, file.relativePath, truncationReason, `Search stopped after ${MAX_SEARCH_ELAPSED_MS} milliseconds.`);
+      break;
+    }
 
-    const content = await fs.readFile(file.absolutePath, "utf8");
+    const remainingByteBudget = MAX_SEARCH_INSPECTED_BYTES - inspectedByteCount;
+    let contentBuffer: Buffer;
+    try {
+      contentBuffer = readFileInsideRootBoundedSync(
+        projectRoot,
+        file.absolutePath,
+        Math.min(MAX_TEXT_SEARCH_BYTES, remainingByteBudget),
+      );
+    } catch (error) {
+      if (error instanceof PhysicalPathError && error.code === "file_too_large") {
+        truncated = true;
+        truncationReason = "search_inspected_byte_budget_reached";
+        pushSkip(skipped, file.relativePath, truncationReason, `Search inspected at most ${MAX_SEARCH_INSPECTED_BYTES} bytes of matching text files.`);
+        break;
+      }
+      throw error;
+    }
+    const content = contentBuffer.toString("utf8");
+    inspectedFileCount += 1;
+    inspectedByteCount += contentBuffer.byteLength;
+    if (Date.now() - searchStartedAt >= MAX_SEARCH_ELAPSED_MS) {
+      truncated = true;
+      truncationReason = "search_elapsed_time_budget_reached";
+      pushSkip(skipped, file.relativePath, truncationReason, `Search stopped after ${MAX_SEARCH_ELAPSED_MS} milliseconds.`);
+      break;
+    }
     const lines = content.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
+      if (index % 128 === 0 && Date.now() - searchStartedAt >= MAX_SEARCH_ELAPSED_MS) {
+        truncated = true;
+        truncationReason = "search_elapsed_time_budget_reached";
+        pushSkip(skipped, file.relativePath, truncationReason, `Search stopped after ${MAX_SEARCH_ELAPSED_MS} milliseconds.`);
+        break searchFiles;
+      }
       const haystack = options.caseSensitive ? lines[index] : lines[index].toLowerCase();
       const column = haystack.indexOf(needle);
       if (column < 0) {
@@ -2062,6 +2102,7 @@ async function searchWithNode(
       }
       if (matches.length >= options.limit) {
         truncated = true;
+        truncationReason = "search_match_limit_reached";
         break;
       }
 
@@ -2070,6 +2111,10 @@ async function searchWithNode(
     if (truncated) {
       break;
     }
+  }
+
+  if (!truncationReason && index.truncated) {
+    truncationReason = index.truncationReason;
   }
 
   return {
@@ -2086,6 +2131,23 @@ async function searchWithNode(
     total_matching_at_least: seenMatches,
     returned_count: matches.length,
     truncated: truncated || index.truncated,
+    truncation_reason: truncationReason,
+    inspected_file_count: inspectedFileCount,
+    inspected_byte_count: inspectedByteCount,
+    inspection_elapsed_ms: Date.now() - searchStartedAt,
+    index_truncated: index.truncated,
+    index_truncation_reason: index.truncationReason,
+    indexed_file_count: index.files.length,
+    traversed_entry_count: index.traversedEntries,
+    traversed_directory_count: index.traversedDirectories,
+    inspection_limits: {
+      max_indexed_files: MAX_SEARCH_INDEXED_FILES,
+      max_indexed_entries: MAX_SEARCH_INDEXED_ENTRIES,
+      max_indexed_directories: MAX_SEARCH_INDEXED_DIRECTORIES,
+      max_files: MAX_SEARCH_INSPECTED_FILES,
+      max_bytes: MAX_SEARCH_INSPECTED_BYTES,
+      max_elapsed_ms: MAX_SEARCH_ELAPSED_MS,
+    },
     matches,
     skipped,
     excludes: blockedPathPolicy(),
@@ -2098,7 +2160,7 @@ async function enrichSearchMatch(
   contextLines: number,
 ): Promise<JsonObject> {
   const resolved = resolveProjectPath(projectRoot, match.relativePath);
-  const content = await fs.readFile(resolved.absolutePath, "utf8");
+  const content = readFileInsideRootSync(projectRoot, resolved.absolutePath).toString("utf8");
   const lines = content.split(/\r?\n/);
   return searchMatchObject(match.relativePath, match.line, match.column, lines, contextLines, match.preview);
 }
@@ -2131,20 +2193,8 @@ function searchMatchObject(
   };
 }
 
-function rgPathText(data: JsonObject): string | null {
-  const pathData = isJsonObject(data.path) ? data.path : null;
-  const raw = typeof pathData?.text === "string" ? pathData.text : null;
-  if (!raw) {
-    return null;
-  }
-  return raw.replaceAll("\\", "/").replace(/^\.\//, "");
-}
-
-function isExecError(error: unknown): error is Error & { code?: number | string; stdout?: string; stderr?: string } {
-  return error instanceof Error && ("code" in error || "stdout" in error);
-}
-
 async function readBoundedLines(
+  projectRoot: string,
   absolutePath: string,
   startLine: number,
   maxLines: number,
@@ -2158,7 +2208,8 @@ async function readBoundedLines(
   truncatedByBytes: boolean;
   moreAfter: boolean;
 }> {
-  const stream = createReadStream(absolutePath, { encoding: "utf8" });
+  const descriptor = openFileInsideRootSync(projectRoot, absolutePath);
+  const stream = createReadStream(absolutePath, { encoding: "utf8", fd: descriptor, autoClose: true });
   const reader = createInterface({ input: stream, crlfDelay: Infinity });
   const lines: Array<{ line: number; text: string; truncated?: boolean }> = [];
   let currentLine = 0;
@@ -2224,14 +2275,14 @@ async function collectAgentsFiles(
 
   for (let i = 0; i < agents.length; i += 1) {
     const file = agents[i];
-    const metadata = await fileMetadataWithSmallSha(file);
+    const metadata = await fileMetadataWithSmallSha(projectRoot, file);
     const item: JsonObject = {
       ...metadata,
       precedence: i + 1,
       scope_directory: path.posix.dirname(file.relativePath) === "." ? "" : path.posix.dirname(file.relativePath),
     };
     if (includePreview) {
-      const preview = await readBoundedLines(file.absolutePath, 1, MAX_AGENTS_PREVIEW_LINES, MAX_AGENTS_PREVIEW_BYTES);
+      const preview = await readBoundedLines(projectRoot, file.absolutePath, 1, MAX_AGENTS_PREVIEW_LINES, MAX_AGENTS_PREVIEW_BYTES);
       item.preview = preview.lines.map((line) => line.text).join("\n");
       item.preview_lines = preview.lines.length;
       item.preview_bytes = preview.byteCount;
@@ -2301,7 +2352,7 @@ async function parseSceneFile(projectRoot: string, scenePath: string): Promise<T
     };
   }
 
-  const content = await fs.readFile(resolved.absolutePath, "utf8");
+  const content = readFileInsideRootSync(projectRoot, resolved.absolutePath).toString("utf8");
   const parsed = parseTscn(content);
   return {
     status: "ok",
@@ -2309,7 +2360,7 @@ async function parseSceneFile(projectRoot: string, scenePath: string): Promise<T
     project_root: projectRoot,
     scene_path: resolved.relativePath,
     scene_res_path: resolved.resPath,
-    file: await fileMetadataWithSmallSha(metadata),
+    file: await fileMetadataWithSmallSha(projectRoot, metadata),
     metadata_only: false,
     readable_text: true,
     node_count: parsed.nodes.length,
@@ -2611,9 +2662,9 @@ async function safePathExists(projectRoot: string, requestedPath: string): Promi
   }
 }
 
-async function readTextIfExists(filePath: string): Promise<string | undefined> {
+async function readTextIfExists(projectRoot: string, filePath: string): Promise<string | undefined> {
   try {
-    return await fs.readFile(filePath, "utf8");
+    return readFileInsideRootSync(projectRoot, filePath).toString("utf8");
   } catch {
     return undefined;
   }

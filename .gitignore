@@ -57,3 +57,7 @@ Desktop.ini
 
 # Local record written by tools/export_public.ps1
 tools/export_staging_record.txt
+
+# Local visual evidence can show private editor content; keep it out of commits.
+godot-codex-bridge/outputs/*.png
+godot-codex-bridge/outputs/*.jpg

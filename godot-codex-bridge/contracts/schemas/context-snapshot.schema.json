@@ -361,7 +361,8 @@
           }
         },
         "is_dirty": {
-          "type": "boolean"
+          "type": ["boolean", "null"],
+          "description": "Null means the editor's unsaved state could not be read reliably; it must not be interpreted as saved."
         },
         "open_scenes": {
           "type": "array",

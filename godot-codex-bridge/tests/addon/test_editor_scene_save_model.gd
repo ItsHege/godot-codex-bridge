@@ -70,10 +70,14 @@ func _run() -> void:
 	var saver := EditorSceneSave.new(ctx)
 	var denied_current := saver.save_scene({})
 	_assert_false(bool(denied_current.get("ok", true)), "save scene denied when permission disabled")
-	_assert_eq(((denied_current.get("error", {}) as Dictionary).get("code")), "permission_denied", "save scene permission error code")
+	_assert_eq(((denied_current.get("error", {}) as Dictionary).get("code")), "trusted_scene_save_approval_unavailable", "save scene approval error code")
 	var denied_all := saver.save_all_scenes({})
 	_assert_false(bool(denied_all.get("ok", true)), "save all scenes denied when permission disabled")
-	_assert_eq(((denied_all.get("error", {}) as Dictionary).get("code")), "permission_denied", "save all permission error code")
+	_assert_eq(((denied_all.get("error", {}) as Dictionary).get("code")), "trusted_scene_save_approval_unavailable", "save all approval error code")
+	ctx.permissions = {"allow_scene_save": true}
+	var still_denied_current := saver.save_scene({})
+	_assert_false(bool(still_denied_current.get("ok", true)), "standing permission cannot authorize save")
+	_assert_eq(((still_denied_current.get("error", {}) as Dictionary).get("code")), "trusted_scene_save_approval_unavailable", "standing permission save error code")
 
 
 func _assert_eq(actual: Variant, expected: Variant, label: String) -> void:

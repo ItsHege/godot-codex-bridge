@@ -64,10 +64,22 @@ func _run() -> void:
 		},
 	}
 	_assert_true(ChatApprovalModel.can_approve(file_with_hash), "file approval with diff hash is allowed")
-	_assert_true(ChatApprovalModel.can_approve_session(file_with_hash), "file approval with diff hash can be session-approved")
+	_assert_false(ChatApprovalModel.can_approve_session(file_with_hash), "file approval with diff hash remains one-shot")
 	var file_summary := ChatApprovalModel.approval_summary(file_with_hash)
 	_assert_true(file_summary.find("Diff hash: abc123") >= 0, "file summary includes diff hash")
 	_assert_true(file_summary.find("File changes: 1 file(s), +1 -1") >= 0, "file summary includes change counts")
+	var too_many_files := file_with_hash.duplicate(true)
+	var oversized_changes := {}
+	for index in range(25):
+		oversized_changes["scripts/file_%d.gd" % index] = {"unified_diff": "@@\n-old\n+new\n"}
+	too_many_files["file_changes"] = oversized_changes
+	_assert_false(ChatApprovalModel.can_approve(too_many_files), "file approval is blocked when the review omits file 25")
+	_assert_true(ChatApprovalModel.disabled_reason(too_many_files).find("full diff") >= 0, "oversized diff explains full review requirement")
+
+	var long_command := command.duplicate(true)
+	long_command["command"] = "x".repeat(1001)
+	_assert_false(ChatApprovalModel.can_approve(long_command), "command with hidden tail is blocked")
+	_assert_true(ChatApprovalModel.disabled_reason(long_command).find("full command") >= 0, "long command explains full review requirement")
 
 	var permission_grant := {
 		"approval_id": "approval-permission",

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { isInsidePath } from "./config.js";
 import { isJsonObject } from "./bridge.js";
+import { assertPhysicalPathSync, readFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject, JsonValue, ServerConfig, ToolEnvelope } from "./types.js";
 
 const DEFAULT_MAX_AGE_MS = 5_000;
@@ -26,8 +27,11 @@ export async function getRuntimeState(config: ServerConfig, args: JsonObject = {
   }
 
   let stat;
+  let stateBytes: Buffer;
   try {
+    assertPhysicalPathSync(config.projectRoot, statePath, { requireFile: true });
     stat = await fs.stat(statePath);
+    stateBytes = readFileInsideRootSync(config.projectRoot, statePath);
   } catch {
     return {
       status: "not_found",
@@ -53,12 +57,12 @@ export async function getRuntimeState(config: ServerConfig, args: JsonObject = {
   }
 
   const maxBytes = boundedNumber(args.maxBytes, DEFAULT_MAX_BYTES, 16 * 1024, 2 * 1024 * 1024);
-  if (stat.size > maxBytes) {
+  if (stateBytes.byteLength > maxBytes) {
     return {
       status: "error",
       runtime_dir: runtimeDir,
       state_path: statePath,
-      size_bytes: stat.size,
+      size_bytes: stateBytes.byteLength,
       max_bytes: maxBytes,
       error: {
         code: "runtime_state_too_large",
@@ -69,7 +73,7 @@ export async function getRuntimeState(config: ServerConfig, args: JsonObject = {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await fs.readFile(statePath, "utf8")) as unknown;
+    parsed = JSON.parse(stateBytes.toString("utf8")) as unknown;
   } catch (error) {
     return {
       status: "error",
@@ -104,7 +108,7 @@ export async function getRuntimeState(config: ServerConfig, args: JsonObject = {
     max_age_ms: maxAgeMs,
     runtime_dir: runtimeDir,
     state_path: statePath,
-    size_bytes: stat.size,
+    size_bytes: stateBytes.byteLength,
     state: sanitizeJson(parsed),
   };
 }
@@ -123,8 +127,11 @@ export async function getRuntimeEvents(config: ServerConfig, args: JsonObject = 
   }
 
   let stat;
+  let eventBytes: Buffer;
   try {
+    assertPhysicalPathSync(config.projectRoot, eventsPath, { requireFile: true });
     stat = await fs.stat(eventsPath);
+    eventBytes = readFileInsideRootSync(config.projectRoot, eventsPath);
   } catch {
     return {
       status: "not_found",
@@ -150,12 +157,12 @@ export async function getRuntimeEvents(config: ServerConfig, args: JsonObject = 
   }
 
   const maxBytes = boundedNumber(args.maxBytes, DEFAULT_MAX_BYTES, 16 * 1024, 2 * 1024 * 1024);
-  if (stat.size > maxBytes) {
+  if (eventBytes.byteLength > maxBytes) {
     return {
       status: "error",
       runtime_dir: runtimeDir,
       events_path: eventsPath,
-      size_bytes: stat.size,
+      size_bytes: eventBytes.byteLength,
       max_bytes: maxBytes,
       error: {
         code: "runtime_events_too_large",
@@ -166,7 +173,7 @@ export async function getRuntimeEvents(config: ServerConfig, args: JsonObject = 
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await fs.readFile(eventsPath, "utf8")) as unknown;
+    parsed = JSON.parse(eventBytes.toString("utf8")) as unknown;
   } catch (error) {
     return {
       status: "error",
@@ -201,7 +208,7 @@ export async function getRuntimeEvents(config: ServerConfig, args: JsonObject = 
     max_age_ms: maxAgeMs,
     runtime_dir: runtimeDir,
     events_path: eventsPath,
-    size_bytes: stat.size,
+    size_bytes: eventBytes.byteLength,
     events: sanitizeJson(parsed),
   };
 }

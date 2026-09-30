@@ -46,11 +46,11 @@ npm install
 # Compile TypeScript packages (MCP Server & Codex Host)
 npm run build
 
-# Run unit tests to verify your setup (127 MCP tests, 46 Host tests)
+# Run unit tests to verify your setup
 npm test
 ```
 
-You should see all MCP and Codex Host test suites passing cleanly (173 tests total).
+You should see all MCP and Codex Host test suites passing with no failures.
 
 ---
 

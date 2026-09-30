@@ -53,8 +53,9 @@ appear in the captured rectangle; it is marked `target_window_verified=false`
 and `occlusion_sensitive=true` and must not be treated as authoritative Godot
 UI proof without a target-window-specific capture.
 
-Programmatic chat visual-evidence capture obeys the same `allow_screenshots`
-permission as other screenshot flows. The artifact manifest preserves
+Fixture-only visual-evidence capture obeys the same `allow_screenshots`
+permission as other screenshot flows; its validation request is not part of
+production dispatch. The artifact manifest preserves
 `capture_source`, `target_window_verified`, and `occlusion_sensitive` so a
 consumer can reject unsafe evidence without inferring provenance from a file
 name. The validation capture also rejects a visible exclusive editor modal
@@ -80,6 +81,18 @@ text paths and reject:
 - generated/imported files;
 - binary files;
 - paths outside the configured project root.
+
+MCP and Host file paths reject linked or junction ancestors and verify opened
+handles before reading or changing content. Controlled guard-to-open parent
+replacement tests cover confined MCP reads and Host overwrites on Windows;
+the same tests are portable to Unix but have not yet run in hosted Unix CI for
+this checkpoint. These checks do not provide an atomic filesystem sandbox
+against a malicious process running as the same OS user. In particular,
+create-only artifact paths are not claimed to prevent an empty outside file
+from being created during a concurrent parent-directory replacement. Keep
+attached projects within the trusted local-user boundary. The affected
+entrypoints, prerequisites and in-scope reachability are recorded separately
+in `docs/CREATE_ONLY_PATH_RACE.md`.
 
 ## Addon Install And Packaging
 
@@ -153,8 +166,9 @@ Reject the change unless every applicable answer is yes:
   project files, edit ProjectSettings, reimport assets, run exports or start
   external services.
 - Mutation gate is explicit. Live scene edits require the relevant Godot dock
-  permission and use UndoRedo; persistent file writes require diff/approval
-  evidence; scene saves require the Save permission.
+  permission and use UndoRedo. Direct Bridge file application and scene-save
+  operations remain disabled until exact, one-use approval and rollback
+  evidence is available; saving from the normal Godot UI remains available.
 - Evidence exists before apply. Risky file writes have a diff preview, current
   hash or drift check where practical, undo snapshot or rollback artifact, and
   a clear validation step after apply.
@@ -197,20 +211,11 @@ mechanism.
 
 ## Selected Node Fixes
 
-`godot.fix_selected_node` is not a broad mutator. It sends a request to the live
-Godot addon and can only apply one allowlisted fix to the first selected node.
-The Godot dock permission `Fix selected node` must be enabled, and the request
-must include approval token `APPROVE_GODOT_CODEX_BRIDGE_FIX_SELECTED_NODE`.
-
-The addon uses Godot editor undo/redo actions for the property change and does
-not save scenes automatically. Supported fixes are intentionally small:
-
-- unhide node;
-- make selected camera current;
-- enable collision shape;
-- enable navigation region;
-- set light energy to a safe default;
-- enable light shadows.
+`godot.fix_selected_node` is temporarily disabled at both MCP and addon dispatch.
+The former public token let a requesting client assert its own approval and has
+been removed. Use the Godot editor UI and UndoRedo directly until a trusted,
+short-lived, single-use human receipt is bound to the exact selected-node state
+and proposed property change.
 
 ## Live Editor Control
 
@@ -258,6 +263,20 @@ The live scene-tree mutation layer still has deliberate limits:
 not bypass Godot Bridge permissions. Bridge permissions remain the final local
 gate for run, clear diagnostics and scene edit actions.
 
+Codex Host approval cards are tied to the active thread and turn. The Godot
+chat can review ordinary local command and file-change requests; it declines
+Codex permission grants, managed network access, terminal input, explicit
+environments, command-policy amendments and persistent write-root grants.
+Trust Session does not make these broader approval scopes reviewable.
+
+File-backed addon actions use a durable request-ID journal. If a response is
+lost or the editor stops mid-action, the bridge reports `outcome_unknown` and
+retains the request ID; it does not repeat that ID's action. A fresh tool call
+gets a new ID, so inspect the prior result or affected scene before calling
+again. The journal refuses new actions at its bounded capacity rather than
+discarding old claims. See `contracts/FILE_TRANSPORT_V2.md` for the exact
+transport contract.
+
 `godot.diagnostics_clear` clears only bridge-owned diagnostics after writing a
 local evidence artifact. It must not pretend to clear native Godot Output or
 Debugger panels unless a stable official API path is implemented.
@@ -278,8 +297,9 @@ state without changing a real project.
 bounded live-editor action plan and recommended Godot Bridge tools, but it does
 not create `.tscn` text, return `proposed_content`, call
 `godot.apply_approved_diff`, import assets, or write files. Scene edits should
-use the live editor tools with Godot UndoRedo, then an explicit permission-gated
-`godot.save_scene` after review. The planner also avoids inventing default
+use the live editor tools with Godot UndoRedo, then be saved from the Godot
+editor UI after review. Direct Bridge save tools remain disabled until they can
+verify exact one-use approval and complete rollback evidence. The planner also avoids inventing default
 geometry from vague prompts; it only lists feature-specific actions when the
 prompt names concrete environment cues.
 
@@ -291,13 +311,11 @@ geometry.
 
 ## Visual Regression
 
-`godot.create_visual_baseline` is temporarily disabled because the MCP process
-cannot yet verify live screenshot permission and project-confined source
-provenance. `godot.compare_visual_regression` remains available for local PNGs;
-its unconstrained input path is tracked for physical-path confinement work.
-Current v1 comparison uses PNG signature, dimensions, byte size, SHA-256 and
-pixel diff for matching-dimension non-interlaced 8-bit PNGs. It does not upload
-screenshots.
+`godot.create_visual_baseline` and `godot.compare_visual_regression` are
+temporarily disabled because the MCP process cannot yet verify live screenshot
+permission and trusted Bridge-owned provenance for every input. The bounded PNG
+parser remains covered by isolated tests, including compressed-size, dimension,
+pixel, chunk, IDAT and inflate output limits, but is not production-dispatched.
 
 `godot.capture_timeline_screenshots` is also local-only screenshot evidence. It
 orchestrates a small sequence of normal addon viewport screenshot requests and

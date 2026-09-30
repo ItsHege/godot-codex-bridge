@@ -54,14 +54,16 @@ without replacing the Godot editor.
   `export_presets.cfg` without running exports.
 - Create local undo snapshot artifacts for explicitly listed project-relative
   scene/script/resource files before risky edits.
-- Compare existing visual-regression screenshots by dimensions, byte size,
-  SHA-256 and supported PNG pixel diff. Baseline creation currently fails
-  closed pending trusted screenshot permission and source provenance.
+- Visual-regression baseline creation and comparison currently fail closed
+  pending live screenshot permission and trusted Bridge-owned provenance for
+  both image inputs.
+- See `docs/RESTRICTED_BUILD.md` for the current capability matrix, supported
+  manual workflows, and conditions for re-enabling disabled operations.
 - Convert scene prompts into bounded live-editor action plans without writing
   generated `.tscn` templates or applying default geometry.
-- Preview text diffs and perform narrow selected-node fixes behind their safety
-  gates. Direct MCP diff application currently fails closed pending trusted,
-  exact-bound approval receipts.
+- Preview text diffs. Direct MCP diff application and selected-node fixes
+  currently fail closed pending trusted, one-use, exact-bound human approval
+  receipts.
 
 ## Not In MVP
 
@@ -85,12 +87,11 @@ command logs, screenshot artifacts, and Eye Attach annotation artifacts. This
 directory can contain private scene names, asset paths, console output,
 screenshots, and whole-editor captures, so treat it as local evidence.
 
-For live addon-backed MCP requests, the preferred path is the local Codex Host
-RPC relay: the MCP server discovers `addons\godot_codex_bridge\host_config.json`,
-calls the host `/bridge/request` endpoint, and the host forwards the request to
-the connected Godot addon over WebSocket. The file bridge remains a
-compatibility/debug fallback when the host RPC path is not configured or not
-available.
+Live addon-backed MCP requests currently use project-local request and response
+files. The Host `/bridge/request` HTTP relay is disabled until the MCP process
+has a separate authenticated transport. The MCP server may still discover the
+local Host URL from `addons\godot_codex_bridge\host_config.json`; a refused
+HTTP attempt falls back to file polling.
 
 The discovered Host RPC target is local-only. The MCP server accepts localhost
 host config targets such as `127.0.0.1`, `localhost` and `::1`; non-local hosts
@@ -100,8 +101,7 @@ are ignored and the file bridge remains the fallback path.
 
 - `addons\godot_codex_bridge` - Godot Editor plugin.
 - `mcp_server` - TypeScript/Node MCP server using the official MCP TypeScript
-  SDK. It prefers Codex Host RPC for live addon requests and falls back to the
-  local bridge directory when needed.
+  SDK. Addon requests currently use the local bridge directory.
 - `codex_host` - local WebSocket host for the Godot in-editor Codex chat. It
   owns Codex app-server compatibility lock, project attachment, streaming state,
   reconnect/cancel/backpressure and future approval orchestration.
@@ -124,6 +124,10 @@ cd godot-codex-bridge
 npm run package:addon
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_addon.ps1 -ProjectRoot "C:\path\to\godot\project"
 ```
+
+Packaging refuses to replace an existing output by default. After reviewing
+the exact output path, use
+`npm run package:addon -- -ReplaceExistingPackage` for an intentional rebuild.
 
 3. After reviewing the dry-run output, copy the addon into the target Godot
    project with `-Apply`, then enable "Godot Codex Bridge" in Project Settings
@@ -179,17 +183,18 @@ Then Codex can call `godot.plan_blender_asset_import` with
 
 ```powershell
 npm run validate:addon-core
-npm run validate:chat-ux
-npm run validate:p9-2-visible-smoke
-npm run validate:external-project-install-smoke
 npm run validate:visible-editor
-npm run validate:visible-chat-editor
-npm run validate:visible-chat-editor:auto-start
-npm run validate:visible-chat-editor:real
-npm run validate:external-project-install-smoke
+npm run validate:restricted-fixture
 npm run validate:blender-import-staging
 npm run validate:blender-mcp-handoff
 ```
+
+`validate:restricted-fixture` verifies supported startup, connection, capture,
+and mock chat paths, but does not claim the broader historical UX scenarios.
+The older `validate:chat-ux` and `validate:visible-chat-editor` scripts still
+depend on removed production validation routes and are not restricted-build
+gates; a legacy failure is not a PASS. Real-account and external-project checks
+require separate authorization.
 
 The broad local validator writes machine-readable JSON and supports scoped
 modes:
@@ -200,8 +205,11 @@ npm run validate:all-local -- -Visible
 npm run validate:all-local -- -RealApp
 ```
 
-`-Fast` runs only addon core, host tests and MCP tests, then records chat UX,
-visible editor, playtest and real-app checks as `not_run` with skip reasons.
+`-Fast` runs only addon core, host tests and MCP tests, then records the
+restricted fixture, visible editor, playtest and real-app checks as `not_run`
+with skip reasons.
+The broader `-Visible` and `-RealApp` legacy suites are not evidence for the
+restricted build until their removed-route expectations are replaced.
 Each JSON report includes `fixture_restore` evidence for the fixture
 `host_config.json`.
 
@@ -214,33 +222,40 @@ npm run host:test
 npm run host:doctor
 ```
 
-The normal Godot user flow is one click: install the addon through the helper,
-open the project, then use the always-visible contextual `Connect`, `Refresh`,
+Install the addon through the helper, start Codex Host from the trusted
+installation, then open the project and use the contextual `Connect`, `Refresh`,
 or `Reconnect` action beside the `Codex Chat` status. `Advanced` keeps model,
 reasoning, trust, team, attachment, and tool controls out of the primary path.
-The helper generates `addons\godot_codex_bridge\host_config.json`, and the addon
-uses that config to start the local Codex Host automatically in the background.
-If the addon started that host, closing Godot or disabling the addon requests a
-clean `host.shutdown` and stops only the owned host process if it is still
-alive. Manually started developer hosts are left under your control.
+The helper generates `addons\godot_codex_bridge\host_config.json` for loopback
+connection and compatibility metadata. That project-local file is not
+executable authority: the addon does not launch its `node_entry` or
+`start_script`. Start Codex Host from the trusted installation, then use the
+dock's Connect action. Closing Godot never stops a manually started Host. The
+trusted launcher displays a one-launch pairing secret; paste it into the dock
+after pressing Connect. The addon asks again after disconnect.
 
-For host-only development, you can still start the local host manually with:
+For an installed project outside the product tree, inspect the trusted
+installation and supported launch configuration, then start it explicitly:
 
 ```powershell
-npm run start:codex-host -- -Runtime mock
+npm run start:codex-host -- -Inspect -ProjectRoot "<installed Godot project>" -Runtime app-server -CodexExecutable "<absolute codex.exe>"
+npm run start:codex-host -- -Start -ProjectRoot "<installed Godot project>" -Runtime app-server -CodexExecutable "<absolute codex.exe>"
 ```
 
-Use `-Runtime mock` for deterministic local validation and `-Runtime app-server`
-when testing against the installed Codex app-server runtime. The Godot addon
-connects to `ws://127.0.0.1:49390`.
+Review the displayed paths and fingerprint; type the exact requested `START`
+line in the second command. Keep that terminal open and type `STOP` to shut down
+its owned Host. `-Runtime mock` is for isolated fixture validation, not an
+authenticated Codex turn. The addon connects to the configured loopback port;
+its project-local config cannot launch or trust a Host. The bundled example
+project is inside the product tree, so use the isolated fixture driver or a
+separately installed project for trusted startup.
 
 ### Example project addon (single source of truth)
 
-`examples\minimal_3d_project\addons\godot_codex_bridge` is a **directory junction**
-to the canonical `addons\godot_codex_bridge`, so there is only one real copy of
-the addon. Open the example project in Godot to validate changes with no manual
-copy step. If the junction is ever missing (fresh checkout or archive extract),
-recreate it with:
+`examples\minimal_3d_project\addons\godot_codex_bridge` is a tracked **copy** of
+the canonical `addons\godot_codex_bridge`, not a junction. Edit only the canonical
+addon; `npm run validate:addon-core` reinstalls the copy before its checks. For
+live iteration in the example project you can replace the copy with a junction:
 
 ```powershell
 pwsh scripts\link-example-addon.ps1

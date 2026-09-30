@@ -2,6 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { isInsidePath } from "./config.js";
+import {
+  assertPhysicalPathSync,
+  ensureDirectoryInsideRootSync,
+  PhysicalPathError,
+  readFileInsideRootSync,
+  writeFileInsideRootSync,
+} from "./physicalPath.js";
 import type { JsonObject, ToolEnvelope } from "./types.js";
 
 const ALLOWED_EXTENSIONS = new Set([".gd", ".tscn", ".tres", ".cfg", ".godot", ".json"]);
@@ -38,13 +45,14 @@ export async function createUndoSnapshot(
   const snapshotId = snapshotIdFor(options.label);
   const snapshotRoot = path.join(bridgeDir, "artifacts", "undo_snapshots", snapshotId);
   const filesRoot = path.join(snapshotRoot, "files");
-  await fs.mkdir(filesRoot, { recursive: true });
+  ensureDirectoryInsideRootSync(projectRoot, filesRoot);
 
   const files: JsonObject[] = [];
   for (const item of validated) {
     const destination = path.join(filesRoot, item.relativePath);
-    await fs.mkdir(path.dirname(destination), { recursive: true });
-    await fs.copyFile(item.absolutePath, destination);
+    ensureDirectoryInsideRootSync(projectRoot, path.dirname(destination));
+    const sourceBytes = readFileInsideRootSync(projectRoot, item.absolutePath);
+    writeFileInsideRootSync(projectRoot, destination, sourceBytes);
     files.push({
       project_relative_path: item.relativePath,
       source_path: item.absolutePath,
@@ -66,7 +74,7 @@ export async function createUndoSnapshot(
     restore_note: "This snapshot is local evidence only. Review files manually before restoring.",
   };
   const manifestPath = path.join(snapshotRoot, "manifest.json");
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeFileInsideRootSync(projectRoot, manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   return {
     ...manifest,
@@ -100,6 +108,14 @@ async function validateSnapshotPath(
   const absolutePath = path.resolve(projectRoot, normalizedRelative);
   if (!isInsidePath(projectRoot, absolutePath)) {
     return { error: { code: "path_boundary_rejected", message: "Resolved snapshot path is outside the project root." } };
+  }
+  try {
+    assertPhysicalPathSync(projectRoot, absolutePath, { requireFile: true });
+  } catch (error) {
+    if (error instanceof PhysicalPathError) {
+      return { error: { code: error.code, message: error.message } };
+    }
+    throw error;
   }
 
   let stat;
