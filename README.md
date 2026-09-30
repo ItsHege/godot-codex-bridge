@@ -1,54 +1,320 @@
 # Godot Codex Bridge
 
-## Local Codex plugin
+**Give AI coding agents eyes, hands and runtime feedback inside the Godot Editor.**
 
-The repository includes a local Codex plugin at `plugins/godot-codex-bridge`. From this checkout, run `codex plugin marketplace add .` and `codex plugin add godot-codex-bridge@personal`. In a new Codex chat for your Godot game, ask Codex to set up Godot Codex Bridge. It previews the addon and project-scoped MCP configuration before applying them. See `plugins/godot-codex-bridge/README.md` for requirements and the in-editor Host distinction.
-
-> **Godot Codex Bridge gives AI coding agents eyes, hands, and runtime feedback inside the Godot Editor.**
-
+[![CI](https://github.com/ItsHege/godot-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/ItsHege/godot-codex-bridge/actions/workflows/ci.yml)
+[![Version: 0.2.0](https://img.shields.io/badge/version-0.2.0-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Engine: Godot 4.x](https://img.shields.io/badge/Godot-4.x-blue.svg)](https://godotengine.org)
 [![Node: >=22.14](https://img.shields.io/badge/Node->=22.14-green.svg)](https://nodejs.org)
 [![MCP: 2025--11--25](https://img.shields.io/badge/MCP-2025--11--25-purple.svg)](https://modelcontextprotocol.io)
 
+![Godot editor with the Codex Tools dock open next to the 3D viewport](docs/images/01_editor_codex_dock.png)
+
+Godot Codex Bridge is a Godot 4 editor addon, a local MCP server and a local
+Codex Host. Together they let OpenAI Codex (in the editor or in the CLI) and
+other MCP clients inspect your live scene, make undoable edits and capture
+visual evidence, while you keep control of every change.
+
+## Highlights
+
+- **In-editor Codex chat.** Chat with Codex in a compact dock that follows the editor theme and remembers your model and reasoning choice.
+- **One-click Connect (Windows).** Trust the local Host once from a terminal; after that, **Connect** starts and pairs it for you.
+- **Readable approvals.** Commands, file changes and tool calls open in a review popup. Read-only Bridge tools can be allowed for the session; project changes, screenshots and runtime input always ask.
+- **Eye Attach.** Capture the editor, draw lettered markers and attach them to your next prompt.
+- **100+ typed `godot.*` MCP tools.** Scene introspection, diagnostics, UndoRedo-backed node edits, diff previews and screenshots, for Codex, Claude, Cursor and other MCP clients.
+- **In-editor updates (Windows).** The Bridge tab checks for a newer reviewed build, installs it with a backup after Godot closes and reopens your project.
+- **Local and permission-gated.** Loopback-only transport, project-bound tools, secret-file and hard-link blocking, and scene edits, saves and runs off by default.
+
+## Contents
+
+- [Why](#why)
+- [Requirements](#requirements)
+- [Quickstart](#quickstart)
+- [Connect Other Agents](#connect-other-agents)
+- [Keeping Projects Up to Date](#keeping-projects-up-to-date)
+- [Try the Example Project](#try-the-example-project)
+- [Visual Tour](#visual-tour)
+- [How It Works](#how-it-works)
+- [Safety Model](#safety-model)
+- [Known Limitations](#known-limitations)
+- [Project Status](#project-status)
+- [Documentation](#documentation)
+- [Repository Layout](#repository-layout)
+- [License](#license)
+
 ---
 
-## The Problem
+## Why
 
-Autonomous and pair-programming AI coding agents (OpenAI Codex, Claude, Cursor, Antigravity) are traditionally blind and handless when working on game engine projects:
+AI coding agents working on Godot projects usually see only `.tscn` and `.gd`
+text on disk:
 
-1. **No live engine context:** Agents only see raw `.tscn` and `.gd` text files on disk. They cannot see the active scene tree, inspect node properties, or understand 3D spatial relationships, lighting, camera frustums, or physics collision layers.
-2. **No visual feedback:** Agents cannot see viewport renderings to verify whether an asset is floating in mid-air, a shader is malfunctioning, or an object is clipping through geometry.
-3. **Unchecked file mutation:** Modifying `.tscn` serialization files directly often corrupts Godot internal node hierarchies, resource UIDs, or scene states without any undo history.
+- **No live context.** They cannot see the open scene tree, inspector values, cameras, lights or collision layers.
+- **No visual feedback.** They cannot tell whether a mesh floats, clips or renders wrong.
+- **Risky edits.** Hand-editing `.tscn` files can break node hierarchies and resource UIDs, with no undo history.
 
-## What Godot Codex Bridge Enables
-
-Godot Codex Bridge connects AI coding agents directly to the active Godot 4 Editor session through a dual-channel architecture:
-
-- A **Model Context Protocol (MCP)** server providing **100+ typed `godot.*` tools** for scene introspection, diagnostics, live node manipulation, diff previews, and viewport screenshot capture.
-- A **Godot Editor Addon** running natively inside Godot to execute commands on the engine main thread via Godot's native `UndoRedo` system, export live context snapshots, capture viewport textures, and render an in-editor **Codex Chat** dock with interactive visual annotations (**"Eye Attach"**).
-- A local **Codex Host** that the editor starts with one click. It pairs with the addon over a local WebSocket, runs the OpenAI Codex `app-server` for in-editor chat and approvals, and binds Codex's Bridge tools to the open project.
+The Bridge gives agents bounded, live editor context and routes edits through
+Godot's own `UndoRedo`, behind permissions you control.
 
 ---
 
-## Key Features
+## Requirements
 
-- **Live Scene Introspection:** Inspect active scene metadata, node hierarchies, selected nodes, inspector properties, resource imports, autoloads, input maps, and performance monitors.
-- **Visual Evidence & Multi-View Capture:** Capture single viewport screenshots (`godot.capture_viewport_screenshot`) or offscreen Front, Side, Top, and Perspective renders of a Node3D target (`godot.capture_multi_view_screenshots`).
-- **UndoRedo-Backed Live Edits:** Create, transform, reparent, rename, duplicate, and delete nodes through Godot's native `UndoRedo` stack, so every change can be undone in the editor with `Ctrl+Z`.
-- **Safe Diff Preview Workflow:** Review unified text diffs with
-  `godot.preview_scene_diff`. Direct MCP application currently fails closed
-  until trusted, exact-bound approval receipts are implemented.
-- **In-Editor Codex Chat & "Eye Attach":** Collaborate with Codex directly inside a dedicated Godot dock panel. "Eye Attach" lets you capture the editor, draw lettered markers (rectangles, pins, arrows, freehand, labels) and attach them to your next prompt.
-- **One-Click Connect:** After a one-time trust step, the Connect button starts the local Codex Host and pairs automatically. What may be launched is recorded per user, outside every game project.
-- **Readable Approvals:** Command, file-change and tool approvals open in a review popup with the full content. Read-only Bridge tools can be allowed once per session; project changes, screenshots and runtime input always ask.
-- **In-Editor Updates:** The Bridge tab checks for a newer reviewed build and installs it with a backup after Godot closes, then reopens your project.
-- **Bounded Scene Runs:** Run the current scene through the editor when its permission is enabled. Direct MCP test-scene execution remains disabled pending live runtime authorization.
-- **Explicit Save Boundary:** Bridge scene-save tools are disabled. Review changes in the editor and save manually through Godot's native UI.
+- **Godot:** 4.x. Developed and validated against Godot 4.7.1; earlier 4.x releases are not verified.
+- **Node.js:** 22.14 or newer; Node 24 LTS recommended. CI covers Node 22 and 24.
+- **Operating system:** Windows is the primary, validated platform. The Node test suites also run on Linux in CI; macOS is untested.
+- **In-editor chat:** Windows with PowerShell 7 (`pwsh`), and the OpenAI Codex CLI installed with npm (`npm install -g @openai/codex`) and signed in. The Host's app-server schemas are locked to Codex CLI 0.156.1.
+- **MCP-only use:** any MCP client that can launch a local stdio server.
 
 ---
 
-## Architecture Overview
+## Quickstart
+
+### 1. Clone and build
+
+```bash
+git clone https://github.com/ItsHege/godot-codex-bridge.git
+cd godot-codex-bridge
+npm install
+npm run build   # MCP server and Codex Host
+npm test        # optional: MCP server and Codex Host test suites
+```
+
+Optionally point `GODOT_BIN` at your Godot 4 executable. If it is unset, the
+Bridge looks for `godot` or `godot4` on `PATH`.
+
+```powershell
+$env:GODOT_BIN = "C:\Path\To\Godot_console.exe"   # Windows (PowerShell)
+```
+
+```bash
+export GODOT_BIN="/usr/local/bin/godot"           # Linux / macOS
+```
+
+### 2. Install the addon into your game project
+
+Your game project must live outside this checkout. The installer is a dry run
+by default and prints the exact files it would add or change:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File godot-codex-bridge/scripts/install_addon.ps1 -ProjectRoot "path/to/your-game"
+powershell -NoProfile -ExecutionPolicy Bypass -File godot-codex-bridge/scripts/install_addon.ps1 -ProjectRoot "path/to/your-game" -Apply
+```
+
+Use `-Apply -Replace` to replace an existing addon copy; the previous copy is
+backed up under `.godot/godot_codex_bridge/install_backups`. On other
+platforms, copy `godot-codex-bridge/addons/godot_codex_bridge` into your
+project's `addons/` folder.
+
+Open the project in Godot and enable **Godot Codex Bridge** under
+**Project → Project Settings → Plugins**. The **Codex Tools** dock appears next
+to the Inspector, with **Bridge** and **Codex Chat** tabs.
+
+### 3. Chat with Codex in the editor (Windows)
+
+Trust the local Codex Host once from a PowerShell 7 terminal:
+
+```powershell
+pwsh godot-codex-bridge/scripts/start_codex_host.ps1 -Trust
+```
+
+This records the Host installation and its Node and Codex executables in
+`%LOCALAPPDATA%\GodotCodexBridge\trusted_host.json`, outside every game
+project. Then press **Connect** in the **Codex Chat** tab. The addon starts the
+Host in the background, pairs with it automatically and binds the Bridge tools
+to the open project. Closing the editor stops that Host.
+
+If you rebuild or update the Host, Connect shows the changed fingerprint and
+asks you to trust the new version before starting it.
+
+### 4. Or use the Bridge from another agent
+
+Skip step 3 and register the MCP server with your agent; see
+[Connect Other Agents](#connect-other-agents).
+
+---
+
+## Connect Other Agents
+
+The MCP server is a local stdio process. Point it at the built entry point and
+at exactly one Godot project root.
+
+### Codex plugin (recommended for the Codex CLI)
+
+This repository includes a local Codex plugin that previews and installs the
+addon and a project-scoped MCP configuration for one game:
+
+```bash
+codex plugin marketplace add .
+codex plugin add godot-codex-bridge@personal
+```
+
+In a new Codex chat in your Godot project, ask Codex to set up Godot Codex
+Bridge. It shows both previews before applying anything. See
+[`plugins/godot-codex-bridge/README.md`](plugins/godot-codex-bridge/README.md)
+for details.
+
+### Codex CLI (manual)
+
+```bash
+codex mcp add godot -- node "/path/to/godot-codex-bridge/godot-codex-bridge/mcp_server/dist/src/index.js" --project-root "/path/to/your-game"
+```
+
+Or in `.codex/config.toml`:
+
+```toml
+[mcp_servers.godot]
+command = "node"
+args = [
+  "/path/to/godot-codex-bridge/godot-codex-bridge/mcp_server/dist/src/index.js",
+  "--project-root", "/path/to/your-game"
+]
+```
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "godot": {
+      "command": "node",
+      "args": [
+        "/path/to/godot-codex-bridge/godot-codex-bridge/mcp_server/dist/src/index.js",
+        "--project-root",
+        "/path/to/your-game"
+      ],
+      "env": {
+        "GODOT_BIN": "/path/to/Godot_console.exe"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to `.cursor/mcp.json` in your workspace:
+
+```json
+{
+  "mcpServers": {
+    "godot": {
+      "command": "node",
+      "args": [
+        "/path/to/godot-codex-bridge/godot-codex-bridge/mcp_server/dist/src/index.js",
+        "--project-root",
+        "${workspaceFolder}"
+      ]
+    }
+  }
+}
+```
+
+Start with `godot.bridge_status` to confirm the editor is connected, and
+`godot.get_tool_catalog` to pick the right tool for a task.
+
+---
+
+## Keeping Projects Up to Date
+
+In-editor updates install the addon from the Host's own checkout, never from
+the game project. To make a project updatable, install it once through the
+update script (with Godot closed) instead of the plain installer:
+
+```powershell
+pwsh godot-codex-bridge/scripts/gc_work.ps1 -Action Publish
+pwsh godot-codex-bridge/scripts/gc_work.ps1 -Action Update -ProjectRoot "path/to/your-game"
+```
+
+`Publish` marks the checkout's committed addon as the reviewed build.
+`Update` installs it with a backup and registers the project. After you pull
+and rebuild a newer version, run `Publish` again; the Bridge tab's **Check**
+button then offers **Update**, which closes Godot through its normal close
+request (so it still asks about unsaved changes), installs the build and
+reopens the project. The flow is described in
+[`ADDON_UPDATE_V1.md`](godot-codex-bridge/contracts/ADDON_UPDATE_V1.md).
+
+---
+
+## Try the Example Project
+
+A small 3D fixture ships with the repository:
+
+```text
+godot-codex-bridge/examples/minimal_3d_project/project.godot
+```
+
+It includes the addon, so an MCP client pointed at it works right away. For
+in-editor chat, copy the project outside the checkout first, because the
+trusted Host refuses projects inside its own installation.
+
+With the plugin enabled, ask your agent:
+
+> *"Check the bridge status, inspect the current 3D scene, and capture multi-view evidence of the mesh."*
+
+A typical run calls:
+
+1. `godot.bridge_status`: addon heartbeat and snapshot freshness.
+2. `godot.get_current_scene`: root node and active camera.
+3. `godot.capture_viewport_screenshot`: a local PNG of the editor viewport.
+4. `godot.capture_multi_view_screenshots`: Front, Side, Top and Perspective renders of the target.
+
+---
+
+## Visual Tour
+
+All screenshots were captured from a Godot 4.7 editor running the included
+`minimal_3d_project` fixture; the chat shows a staged sample conversation.
+
+### Codex Chat
+
+Connection status, thread controls, model and reasoning pickers, the tools
+allowed for this session, and the multiline composer.
+
+![Codex Chat dock with Advanced controls expanded](docs/images/02_chat_controls_dock.png)
+
+### Permissions
+
+The Bridge tab shows snapshot and update status, context actions and a
+permission profile. Individual permissions fold under "Advanced permissions";
+scene edits, saves and scene runs are off by default.
+
+![Bridge tab showing permission toggles](docs/images/03_bridge_permissions.png)
+
+### Eye Attach
+
+Capture the editor, draw lettered markers and attach them to the next prompt so
+the agent sees exactly which region you mean. Markers are listed on the side
+and can be removed individually.
+
+![Eye Attach window with lettered markers drawn over the 3D scene](docs/images/04_eye_attach_annotation.png)
+
+### Approval Review
+
+When Codex wants to run a command, change files or use a Bridge tool, a review
+popup shows exactly what it asks for.
+
+![Approval popup asking to run a read-only Godot Bridge tool](docs/images/06_approval_popup.png)
+
+### Multi-View Verification
+
+`godot.capture_multi_view_screenshots` renders Front, Side, Top and Perspective
+views of a target offscreen and saves local PNGs plus a JSON manifest. These
+four frames came from the fixture's `MeshInstance3D`, arranged in a 2×2 grid
+with view labels added.
+
+![Front, side, top, and perspective offscreen renders of the fixture mesh](docs/images/05_multiview_verification.png)
+
+---
+
+## How It Works
+
+- **Godot addon** (GDScript): runs inside the editor, executes requests on the main thread through `UndoRedo`, writes context snapshots, captures viewports and hosts the Codex Chat dock.
+- **MCP server** (TypeScript): exposes the `godot.*` tools over stdio and reaches the addon through project-local request and response files. Each request has a UUID and runs at most once; retries replay the stored result instead of repeating the action.
+- **Codex Host** (TypeScript): a loopback-only process started by Connect. It pairs with the addon over a local WebSocket, runs the Codex `app-server` for chat and approvals, and binds Codex's Bridge tools to the open project.
 
 ```mermaid
 flowchart TD
@@ -81,7 +347,7 @@ flowchart TD
     subgraph LocalStorage ["Project Local Evidence (.godot/godot_codex_bridge/)"]
         Snapshot["context_snapshot.json"]
         Artifacts["Screenshots & Multi-View Evidence"]
-        Transport["requests/ & responses/<br/>(atomic, exactly-once journal)"]
+        Transport["requests/ & responses/<br/>(atomic, at-most-once journal)"]
     end
 
     Codex -->|stdio MCP| MCPServer
@@ -105,296 +371,102 @@ flowchart TD
     RuntimeProbe --> LocalStorage
 ```
 
----
-
-## Closed-Loop Agent Workflow
-
-Godot Codex Bridge enables agents to follow an empirical verification cycle:
+A typical agent loop:
 
 ```text
-  1. INSPECT   ──► Read the active scene tree, selection, and diagnostics
-  2. MODIFY    ──► Move or create nodes live via Godot UndoRedo
-  3. RUN       ──► Launch the current or test scene with bounded output
-  4. OBSERVE   ──► Capture multi-view screenshot evidence and runtime logs
-  5. VERIFY    ──► Evaluate visual alignment, performance monitors, and errors
-  6. SAVE      ──► Explicitly persist scene files once verified
+1. INSPECT  ─► Read the scene tree, selection and diagnostics
+2. MODIFY   ─► Create or move nodes live through Godot UndoRedo
+3. RUN      ─► Run the current scene (when its permission is enabled)
+4. OBSERVE  ─► Capture viewport or multi-view screenshots and runtime output
+5. VERIFY   ─► Check placement, performance monitors and errors
+6. SAVE     ─► You review and save in the Godot editor
 ```
-
----
-
-## Visual Interface & Media
-
-Godot Codex Bridge integrates directly into the Godot Editor interface with native controls and real-time visual grounding. All screenshots below were captured from a Godot 4.7 editor running the included `minimal_3d_project` fixture; the chat shows a staged sample conversation.
-
-### Codex Tools Dock
-
-The addon docks next to the Inspector, with Bridge and Codex Chat tabs alongside the live 3D scene. It follows the editor theme and keeps chat compact: status lines stay single-line, work notes fold away and the composer shows the model the next message will use.
-
-![Godot editor with the Codex Tools dock open next to the 3D viewport](docs/images/01_editor_codex_dock.png)
-
-### In-Editor Codex Chat
-
-Connection status, thread controls, model and reasoning pickers (your last choice is remembered), the tools allowed for this session, and the multiline composer.
-
-![Codex Chat dock with Advanced controls expanded](docs/images/02_chat_controls_dock.png)
-
-### Granular Permissions
-
-The Bridge tab shows snapshot and update status, context actions, and a permission profile. Individual permissions fold under "Advanced permissions"; scene edits, saves, and scene execution are off by default.
-
-![Bridge tab showing permission toggles](docs/images/03_bridge_permissions.png)
-
-### "Eye Attach" Annotation
-
-Capture the editor, draw lettered reference markers, and attach them to the next prompt so the agent can see exactly which region you mean. Markers are listed on the side and can be removed individually.
-
-![Eye Attach window with lettered markers drawn over the 3D scene](docs/images/04_eye_attach_annotation.png)
-
-### Approval Review
-
-When Codex wants to run a command, change files or use a Bridge tool, a review popup shows exactly what it asks. Read-only Bridge tools can be allowed for the rest of the session.
-
-![Approval popup asking to run a read-only Godot Bridge tool](docs/images/06_approval_popup.png)
-
-### Multi-View Verification
-
-`godot.capture_multi_view_screenshots` renders Front, Side, Top, and Perspective views of a target offscreen and saves local PNGs plus a JSON manifest. These four frames came from the fixture's `MeshInstance3D`, arranged in a 2×2 grid with view labels added.
-
-![Front, side, top, and perspective offscreen renders of the fixture mesh](docs/images/05_multiview_verification.png)
 
 ---
 
 ## Safety Model
 
-- **Local-Only by Default:** All screenshots, snapshots, logs, and annotation artifacts reside in `.godot/godot_codex_bridge/` inside the local project. Nothing is uploaded externally.
-- **Read-First Philosophy:** Tools are read-only by default; each tool's safety level is listed by `godot.get_tool_catalog`.
-- **UndoRedo Protection:** All live scene and node manipulations register official Godot undo actions.
-- **File System Guardrails:** File operations enforce project-root boundary checks (`isInsidePath`) and reject path traversal (`..`), absolute paths, or access to sensitive binary directories.
-- **Diff Preview Before Save:** Text script and scene patches require unified diff preview review before apply.
+- **Local only.** Snapshots, screenshots, logs and annotations stay in `.godot/godot_codex_bridge/` inside your project. The Bridge adds no telemetry and uploads nothing; Codex itself talks to your configured model provider.
+- **Loopback and pairing.** The Codex Host binds to loopback only and pairs with the addon using a per-launch secret and mutual proofs. Unpaired connections cannot call privileged methods.
+- **Per-user trust.** Connect only launches what `%LOCALAPPDATA%\GodotCodexBridge\trusted_host.json` names and refuses a changed installation until you trust it again. Project files cannot choose what runs.
+- **Read-first tools.** Every tool's safety level is listed by `godot.get_tool_catalog`. Scene edits, saves and scene runs are off by default in the addon's permissions.
+- **Undoable edits.** Live node changes register native Godot `UndoRedo` actions, so `Ctrl+Z` works.
+- **Path guardrails.** File access stays inside the project root and rejects traversal, absolute paths, symbolic links, junctions and hard-linked files. Project reading tools never return common secret files such as `.env*`, keys, keystores and credentials.
+- **Explicit saves.** Bridge scene-save tools and direct diff application are disabled. Review changes with `godot.preview_scene_diff` and save through Godot's own UI.
 
----
-
-## Requirements
-
-- **Godot Engine:** Godot 4.x. Developed and validated against Godot 4.7.1; earlier 4.x releases are not verified.
-- **Node.js:** Version `22.14` or higher; Node 24 LTS recommended. CI covers Node 22 and 24.
-- **Operating System:** Windows, Linux, or macOS.
-
----
-
-## Quickstart
-
-### 1. Clone & Build the Repository
-
-```bash
-git clone https://github.com/ItsHege/godot-codex-bridge.git
-cd godot-codex-bridge
-
-# Install root & workspace dependencies (MCP Server and Codex Host)
-npm install
-
-# Compile TypeScript packages
-npm run build
-
-# Run the MCP server and Codex Host test suites
-npm test
-```
-
-*(You can also build or test individual packages directly from their directories: `godot-codex-bridge/mcp_server` and `godot-codex-bridge/codex_host`.)*
-
-### 2. Configure Your Godot Executable
-
-Set `GODOT_BIN` to point to your Godot 4 executable:
-
-```bash
-# Windows (PowerShell)
-$env:GODOT_BIN = "C:\Path\To\Godot_console.exe"
-
-# Linux / macOS
-export GODOT_BIN="/usr/local/bin/godot"
-```
-
-*(If unset, the bridge automatically searches your system `PATH` for `godot` or `godot4`.)*
-
-### 3. Install the Addon into Your Godot Project
-
-Copy the addon folder into your Godot project:
-
-```text
-your-godot-project/
-└── addons/
-    └── godot_codex_bridge/
-```
-
-*(You can use `powershell -File scripts/install_addon.ps1 -ProjectRoot "path/to/project" -Apply` on Windows, or simply copy the directory.)*
-
-Open your project in Godot, navigate to **Project Settings → Plugins**, and check **Enable** for **Godot Codex Bridge**.
-
-### 4. In-Editor Codex Chat (Windows)
-
-Trust the local Codex Host once from a PowerShell 7 terminal (it records the Host, Node and Codex executables under `%LOCALAPPDATA%\GodotCodexBridge`):
-
-```powershell
-pwsh godot-codex-bridge/scripts/start_codex_host.ps1 -Trust
-```
-
-Then press **Connect** in the Codex Chat tab. The addon starts the Host in the background, pairs automatically and binds the Bridge tools to the open project. After you rebuild the Host, Connect asks you to trust the changed installation again.
-
----
-
-## Agent Configuration
-
-### A. OpenAI Codex CLI Setup (Primary)
-
-Add the MCP server to Codex via the CLI or configuration file:
-
-```bash
-# Option 1: Via Codex CLI command (recommended)
-codex mcp add godot -- node "C:/path/to/godot-codex-bridge/godot-codex-bridge/mcp_server/dist/src/index.js" --project-root "C:/path/to/your-godot-project"
-```
-
-Or in your project root or workspace `.codex/config.toml`:
-
-```toml
-# Option 2: In .codex/config.toml
-[mcp_servers.godot]
-command = "node"
-args = [
-  "C:/path/to/godot-codex-bridge/godot-codex-bridge/mcp_server/dist/src/index.js",
-  "--project-root", "C:/path/to/your-godot-project"
-]
-```
-
-### B. Claude Desktop Setup
-
-Add to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "godot": {
-      "command": "node",
-      "args": [
-        "C:/path/to/godot-codex-bridge/godot-codex-bridge/mcp_server/dist/src/index.js",
-        "--project-root",
-        "C:/path/to/your-godot-project"
-      ],
-      "env": {
-        "GODOT_BIN": "C:/Path/To/Godot_console.exe"
-      }
-    }
-  }
-}
-```
-
-### C. Cursor Setup
-
-Add to `.cursor/mcp.json` in your workspace:
-
-```json
-{
-  "mcpServers": {
-    "godot": {
-      "command": "node",
-      "args": [
-        "${workspaceFolder}/godot-codex-bridge/mcp_server/dist/src/index.js",
-        "--project-root",
-        "${workspaceFolder}/your-godot-project"
-      ]
-    }
-  }
-}
-```
-
----
-
-## Try the Minimal 3D Example
-
-Open the included test fixture in Godot:
-
-```bash
-# Path to fixture
-godot-codex-bridge/examples/minimal_3d_project/project.godot
-```
-
-Once opened with the plugin enabled, ask your agent:
-
-> *"Check the bridge status, inspect the current 3D scene, and capture multi-view evidence of the mesh."*
-
-The agent will typically call:
-1. `godot.bridge_status` — verifies addon heartbeat and live snapshot freshness.
-2. `godot.get_current_scene` — inspects the root node and active camera.
-3. `godot.capture_viewport_screenshot` — saves a local PNG of the editor viewport.
-4. `godot.capture_multi_view_screenshots` — saves Front, Side, Top, and Perspective renders of the target.
-
----
-
-## Repository Structure
-
-To navigate the repository effectively:
-
-```text
-godot-codex-bridge/
-├── .github/                       # CI workflow and community issue/PR templates
-├── docs/images/                   # Media assets and screenshots
-├── godot-codex-bridge/            # Product implementation root
-│   ├── addons/godot_codex_bridge/ # Godot 4 Editor addon (GDScript)
-│   ├── mcp_server/                # Model Context Protocol server (TypeScript)
-│   ├── codex_host/                # Local daemon for in-editor chat & RPC (TypeScript)
-│   ├── examples/                  # Minimal 3D test project & fixtures
-│   ├── contracts/                 # Bridge payload schemas, file transport, update and connect contracts
-│   ├── tests/                     # GDScript addon tests and snapshot validators
-│   ├── docs/                      # Architecture, install, quickstart, safety, and MCP tool docs
-│   └── scripts/                   # Install, packaging, and validation scripts
-├── plugins/godot-codex-bridge/    # Local Codex plugin that sets up the addon and project MCP config
-├── package.json                   # Root npm workspace configuration
-├── CONTRIBUTING.md                # Development setup, testing, and contribution rules
-├── SECURITY.md                    # Vulnerability reporting and privilege boundaries
-├── CHANGELOG.md                   # Release history and version tracking
-└── AGENTS.md                      # Guidance for AI coding agents contributing to this repo
-```
-
-> **Note:** The repository root provides workspace-wide build, test, and CI automation; product code lives under `godot-codex-bridge/`. The addon installer writes a machine-specific `addons/godot_codex_bridge/host_config.json` into each target project. It is ignored by git; see [`host_config.example.json`](godot-codex-bridge/docs/host_config.example.json) for its shape.
-
----
-
-## Documentation
-
-- [Quickstart Guide](godot-codex-bridge/docs/QUICKSTART.md) — Step-by-step walkthrough from clean install to first agent command.
-- [Install & Development Guide](godot-codex-bridge/docs/INSTALL_DEV.md) — Addon install helper, Codex Host, and visible-editor validation.
-- [MCP Tool Catalog](godot-codex-bridge/docs/MCP_TOOLS.md) — Reference for the `godot.*` tools.
-- [Architecture Details](godot-codex-bridge/docs/ARCHITECTURE.md) — Deep dive into snapshot serialization and RPC routing.
-- [Safety Specifications](godot-codex-bridge/docs/SAFETY.md) — Threat models, approval tokens, and path confinement rules.
-- [Contributing Guide](CONTRIBUTING.md) — Development setup, test commands, and PR standards.
-- [Security Policy](SECURITY.md) — Vulnerability reporting and privilege boundaries.
-- [Changelog](CHANGELOG.md) — Version history and release notes.
-
----
-
-## Project Status & Maturity
-
-- **Maturity:** Developer Preview / MVP.
-- **Test Coverage:** automated suites for each layer (run them for current counts):
-  - MCP server tests (`npm run test:mcp`)
-  - Codex Host tests (`npm run test:host`)
-  - GDScript addon tests (`npm run validate:addon-core`, requires Godot)
-- **Engine Support:** Developed and validated against Godot 4.7.1.
+See [SAFETY.md](godot-codex-bridge/docs/SAFETY.md) for the full threat model and
+[SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ---
 
 ## Known Limitations
 
-- **Editor Must Be Open for Live Tools:** Addon-backed tools (screenshots, live node selection, transform edits) require an active Godot Editor session. When Godot is closed, the bridge provides bounded offline project reading (`godot.get_scene_file_tree`, `godot.project_get_map`, `godot.read_project_file`).
-- **Modal Dialog Blocking:** When a native blocking file dialog or modal confirmation is active in Godot, the main engine thread freezes, pausing heartbeat updates until dismissed.
-- **Single Active Editor Session:** The bridge currently pairs one MCP server process with one target Godot project root.
-- **Playtest Input Disabled:** `godot.playtest_input` and `godot.run_playtest_scenario` fail closed until the addon exposes trusted live runtime authorization. `godot.editor_viewport_navigate` supports the 2D viewport only.
-- **One-Click Connect Is Windows-Only:** The trusted Host launcher and in-editor updates use PowerShell 7 on Windows. On other platforms, start the Host manually.
-- **Multi-View Renders Are Proxies:** Multi-view capture renders unshaded proxies of meshes and collision shapes in an isolated world, not the fully lit editor scene. If the GPU frame comes back blank, the manifest reports `render_source: software_geometry_fallback`.
+- **Live tools need the editor.** Screenshots, selection and node edits require a running Godot editor. With Godot closed, offline tools such as `godot.get_scene_file_tree`, `godot.project_get_map` and `godot.read_project_file` still read the project.
+- **Modal dialogs pause the Bridge.** A blocking Godot dialog freezes the editor main thread, so heartbeats and requests wait until it closes.
+- **One project per server.** Each MCP server process serves exactly one Godot project root.
+- **Playtest input is disabled.** `godot.playtest_input` and `godot.run_playtest_scenario` fail closed until the addon exposes trusted runtime authorization. `godot.editor_viewport_navigate` supports the 2D viewport only.
+- **Windows-only conveniences.** One-click Connect and in-editor updates use PowerShell 7 on Windows. Other platforms are not validated for in-editor chat.
+- **Multi-view renders are proxies.** Multi-view capture renders unshaded proxies of meshes and collision shapes in an isolated world, not the lit editor scene. If the GPU frame comes back blank, the manifest reports `render_source: software_geometry_fallback`.
+
+---
+
+## Project Status
+
+- **Maturity:** developer preview.
+- **Tests:** each layer has an automated suite; run them for current results.
+  - MCP server: `npm run test:mcp`
+  - Codex Host: `npm run test:host`
+  - GDScript addon: `npm run validate:addon-core` (requires Godot)
+- **CI:** Node tests on Windows and Ubuntu with Node 22 and 24, plus a headless addon regression on a checksum-pinned Godot 4.7.1 build.
+
+---
+
+## Documentation
+
+- [Quickstart Guide](godot-codex-bridge/docs/QUICKSTART.md): from a clean install to your first agent command.
+- [Install & Development Guide](godot-codex-bridge/docs/INSTALL_DEV.md): addon installer, Codex Host, updates and validation.
+- [MCP Tool Reference](godot-codex-bridge/docs/MCP_TOOLS.md): the `godot.*` tools.
+- [Architecture](godot-codex-bridge/docs/ARCHITECTURE.md): snapshots, transport and routing.
+- [Safety](godot-codex-bridge/docs/SAFETY.md): threat model, approvals and path confinement.
+- [Contracts](godot-codex-bridge/contracts/README.md): payload schemas, file transport, connect and update contracts.
+- [Contributing](CONTRIBUTING.md): development setup, tests and PR checklist.
+- [Security Policy](SECURITY.md): vulnerability reporting and privilege boundaries.
+- [Changelog](CHANGELOG.md): release history.
+
+---
+
+## Repository Layout
+
+```text
+godot-codex-bridge/
+├── .github/                       # CI workflow and issue/PR templates
+├── docs/images/                   # README and changelog screenshots
+├── godot-codex-bridge/            # Product root
+│   ├── addons/godot_codex_bridge/ # Godot 4 editor addon (GDScript)
+│   ├── mcp_server/                # MCP server (TypeScript)
+│   ├── codex_host/                # Local Codex Host for in-editor chat (TypeScript)
+│   ├── contracts/                 # Payload schemas, file transport, connect and update contracts
+│   ├── examples/                  # Minimal 3D fixture project
+│   ├── tests/                     # GDScript addon tests and snapshot validators
+│   ├── docs/                      # Install, quickstart, architecture, safety and tool docs
+│   └── scripts/                   # Install, Host launcher, update, packaging and validation scripts
+├── plugins/godot-codex-bridge/    # Local Codex plugin: addon and project MCP setup
+├── package.json                   # Root npm workspace
+├── CONTRIBUTING.md
+├── SECURITY.md
+├── CHANGELOG.md
+└── AGENTS.md                      # Guidance for AI agents contributing to this repo
+```
+
+The installer writes a machine-specific `addons/godot_codex_bridge/host_config.json`
+into each target project with loopback connection details. It is ignored by
+git and never decides what the editor launches; see [`host_config.example.json`](godot-codex-bridge/docs/host_config.example.json)
+for its shape.
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).
 
-*Godot Engine is an open-source project registered by the Godot Foundation. OpenAI and Codex are trademarks of OpenAI. Godot Codex Bridge is an independent community open-source project and is not officially affiliated with or endorsed by OpenAI or the Godot Foundation.*
+*Godot Engine is an open-source project registered by the Godot Foundation. OpenAI and Codex are trademarks of OpenAI. Godot Codex Bridge is an independent community project and is not affiliated with or endorsed by OpenAI or the Godot Foundation.*

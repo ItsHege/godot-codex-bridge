@@ -7,7 +7,7 @@ extends RefCounted
 ## preload this file directly (e.g. `const L := preload("bridge_limits.gd")`).
 
 const PLUGIN_NAME := "Godot Codex Bridge"
-const PLUGIN_VERSION := "0.0.1"
+const PLUGIN_VERSION := "0.2.0"
 const PROTOCOL_VERSION := "godot-codex-bridge/0.1"
 
 const BRIDGE_DIR := "res://.godot/godot_codex_bridge"

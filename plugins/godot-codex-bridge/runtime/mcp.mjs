@@ -3261,8 +3261,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path15) {
-      let input = path15;
+    function removeDotSegments(path16) {
+      let input = path16;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3671,8 +3671,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path15 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path15 && path15 !== "/" ? path15 : void 0;
+        const path16 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path16 && path16 !== "/" ? path16 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7557,8 +7557,8 @@ function getErrorMap() {
 
 // godot-codex-bridge/mcp_server/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path15, errorMaps, issueData } = params;
-  const fullPath = [...path15, ...issueData.path || []];
+  const { data, path: path16, errorMaps, issueData } = params;
+  const fullPath = [...path16, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -7673,11 +7673,11 @@ var errorUtil;
 
 // godot-codex-bridge/mcp_server/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path15, key) {
+  constructor(parent, value, path16, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path15;
+    this._path = path16;
     this._key = key;
   }
   get path() {
@@ -11597,10 +11597,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path15) {
-  if (!path15)
+function getElementAtPath(obj, path16) {
+  if (!path16)
     return obj;
-  return path15.reduce((acc, key) => acc?.[key], obj);
+  return path16.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12009,11 +12009,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path15, issues) {
+function prefixIssues(path16, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path15);
+    iss.path.unshift(path16);
     return iss;
   });
 }
@@ -12160,16 +12160,16 @@ function flattenError(error51, mapper = (issue2) => issue2.message) {
 }
 function formatError(error51, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error52, path15 = []) => {
+  const processError = (error52, path16 = []) => {
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path16, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -12196,17 +12196,17 @@ function formatError(error51, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error51, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error52, path15 = []) => {
+  const processError = (error52, path16 = []) => {
     var _a3, _b;
     for (const issue2 of error52.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path16, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -12238,8 +12238,8 @@ function treeifyError(error51, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path15 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path15) {
+  const path16 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path16) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -25364,13 +25364,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path15 = ref.slice(1).split("/").filter(Boolean);
-  if (path15.length === 0) {
+  const path16 = ref.slice(1).split("/").filter(Boolean);
+  if (path16.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path15[0] === defsKey) {
-    const key = path15[1];
+  if (path16[0] === defsKey) {
+    const key = path16[1];
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -31262,8 +31262,267 @@ var StdioServerTransport = class {
 };
 
 // godot-codex-bridge/mcp_server/src/config.ts
+import fs2 from "node:fs";
+import path2 from "node:path";
+
+// godot-codex-bridge/mcp_server/src/physicalPath.ts
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
+var PhysicalPathError = class extends Error {
+  constructor(code, message, targetPath) {
+    super(message);
+    this.code = code;
+    this.targetPath = targetPath;
+    this.name = "PhysicalPathError";
+  }
+  code;
+  targetPath;
+};
+function ensureDirectoryInsideRootSync(rootPath, directoryPath) {
+  const root = path.resolve(rootPath);
+  const directory = path.resolve(directoryPath);
+  assertPhysicalPathSync(root, root, { requireDirectory: true });
+  if (!isInside(root, directory)) {
+    throw new PhysicalPathError("path_boundary_rejected", "Directory is outside the configured root.", directory);
+  }
+  const relative = path.relative(root, directory);
+  const parts = relative === "" ? [] : relative.split(path.sep).filter(Boolean);
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    try {
+      assertPhysicalPathSync(root, current, { requireDirectory: true });
+      continue;
+    } catch (error51) {
+      if (!(error51 instanceof PhysicalPathError) || error51.code !== "path_unavailable" && error51.code !== "root_unavailable") {
+        throw error51;
+      }
+    }
+    try {
+      fs.mkdirSync(current);
+    } catch (error51) {
+      if (!isNodeError(error51) || error51.code !== "EEXIST") {
+        throw error51;
+      }
+    }
+    assertPhysicalPathSync(root, current, { requireDirectory: true });
+  }
+}
+function writeFileInsideRootSync(rootPath, targetPath, data) {
+  const target = path.resolve(targetPath);
+  ensureDirectoryInsideRootSync(rootPath, path.dirname(target));
+  try {
+    assertPhysicalPathSync(rootPath, target, { requireFile: true });
+    throw new PhysicalPathError("target_exists", "Refusing to overwrite an existing file through the confined artifact writer.", target);
+  } catch (error51) {
+    if (!(error51 instanceof PhysicalPathError) || error51.code !== "path_unavailable") {
+      throw error51;
+    }
+    assertPhysicalPathSync(rootPath, target, { allowMissingLeaf: true });
+  }
+  const noFollow = process.platform === "win32" ? 0 : fs.constants.O_NOFOLLOW;
+  const descriptor = fs.openSync(target, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | noFollow, 384);
+  try {
+    const opened = fs.fstatSync(descriptor);
+    const current = fs.statSync(target);
+    if (!opened.isFile() || opened.ino !== current.ino || opened.dev !== current.dev) {
+      throw new PhysicalPathError("file_identity_changed", "File identity changed while it was being opened for writing.", target);
+    }
+    assertPhysicalPathSync(rootPath, target, { requireFile: true });
+    fs.writeFileSync(descriptor, data);
+    fs.fsyncSync(descriptor);
+    assertPhysicalPathSync(rootPath, target, { requireFile: true });
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+function publishFileInsideRootSync(rootPath, targetPath, data) {
+  const target = path.resolve(targetPath);
+  ensureDirectoryInsideRootSync(rootPath, path.dirname(target));
+  assertPhysicalPathSync(rootPath, target, { allowMissingLeaf: true });
+  if (fs.existsSync(target)) {
+    throw new PhysicalPathError("target_exists", "Refusing to replace an existing artifact.", target);
+  }
+  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`);
+  writeFileInsideRootSync(rootPath, temporary, data);
+  try {
+    assertPhysicalPathSync(rootPath, target, { allowMissingLeaf: true });
+    if (fs.existsSync(target)) {
+      throw new PhysicalPathError("target_exists", "Refusing to replace an existing artifact.", target);
+    }
+    fs.renameSync(temporary, target);
+    assertPhysicalPathSync(rootPath, target, { requireFile: true });
+  } finally {
+    if (fs.existsSync(temporary)) {
+      assertPhysicalPathSync(rootPath, temporary, { requireFile: true });
+      fs.unlinkSync(temporary);
+    }
+  }
+}
+function readFileInsideRootSync(rootPath, targetPath) {
+  const descriptor = openFileInsideRootSync(rootPath, targetPath);
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile()) {
+      throw new PhysicalPathError("not_a_file", "Expected a regular file.", targetPath);
+    }
+    const bytes = fs.readFileSync(descriptor);
+    const after = fs.fstatSync(descriptor);
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) {
+      throw new PhysicalPathError("file_changed_during_read", "File changed while it was being read.", targetPath);
+    }
+    assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
+    return bytes;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+function readFileInsideRootBoundedSync(rootPath, targetPath, maxBytes) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new PhysicalPathError("invalid_read_limit", "Bounded file reads require a non-negative integer byte limit.", targetPath);
+  }
+  const descriptor = openFileInsideRootSync(rootPath, targetPath);
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile()) {
+      throw new PhysicalPathError("not_a_file", "Expected a regular file.", targetPath);
+    }
+    if (before.size > maxBytes) {
+      throw new PhysicalPathError("file_too_large", `File exceeds the ${maxBytes}-byte read limit.`, targetPath);
+    }
+    const buffer = Buffer.alloc(Math.min(maxBytes + 1, before.size + 1));
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = fs.readSync(descriptor, buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (count === 0) {
+        break;
+      }
+      bytesRead += count;
+    }
+    if (bytesRead > maxBytes) {
+      throw new PhysicalPathError("file_too_large", `File exceeds the ${maxBytes}-byte read limit.`, targetPath);
+    }
+    const after = fs.fstatSync(descriptor);
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) {
+      throw new PhysicalPathError("file_changed_during_read", "File changed while it was being read.", targetPath);
+    }
+    assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+function openFileInsideRootSync(rootPath, targetPath) {
+  assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
+  const noFollow = process.platform === "win32" ? 0 : fs.constants.O_NOFOLLOW;
+  const descriptor = fs.openSync(targetPath, fs.constants.O_RDONLY | noFollow);
+  try {
+    assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
+    const opened = fs.fstatSync(descriptor);
+    const current = fs.statSync(targetPath);
+    if (!opened.isFile() || opened.size !== current.size || opened.ino !== current.ino || opened.dev !== current.dev) {
+      throw new PhysicalPathError("file_identity_changed", "File identity changed while it was being opened.", targetPath);
+    }
+    if (opened.nlink > 1) {
+      throw new PhysicalPathError("hardlink_rejected", "Files with more than one hard link are not allowed.", targetPath);
+    }
+    return descriptor;
+  } catch (error51) {
+    fs.closeSync(descriptor);
+    throw error51;
+  }
+}
+function assertPhysicalPathSync(rootPath, targetPath, options = {}) {
+  const root = path.resolve(rootPath);
+  const target = path.resolve(targetPath);
+  if (!isInside(root, target)) {
+    throw new PhysicalPathError("path_boundary_rejected", "Path is outside the configured root.", target);
+  }
+  let rootReal;
+  try {
+    assertNoLinkedRootComponents(root);
+    const rootStat = fs.lstatSync(root);
+    if (rootStat.isSymbolicLink()) {
+      throw new PhysicalPathError("reparse_root_rejected", "The configured root cannot be a symbolic link or junction.", root);
+    }
+    if (!rootStat.isDirectory()) {
+      throw new PhysicalPathError("root_not_a_directory", "The configured root must be a directory.", root);
+    }
+    rootReal = fs.realpathSync.native(root);
+  } catch (error51) {
+    if (error51 instanceof PhysicalPathError) {
+      throw error51;
+    }
+    throw new PhysicalPathError("root_unavailable", "Configured root does not exist or cannot be resolved.", root);
+  }
+  const relative = path.relative(root, target);
+  const parts = relative === "" ? [] : relative.split(path.sep).filter(Boolean);
+  let current = root;
+  for (let index = 0; index < parts.length; index += 1) {
+    current = path.join(current, parts[index]);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error51) {
+      if (isNodeError(error51) && error51.code === "ENOENT" && (options.allowMissingTail || options.allowMissingLeaf && index === parts.length - 1)) {
+        return { rootPath: root, rootRealPath: rootReal, targetPath: target, targetRealPath: null };
+      }
+      throw new PhysicalPathError("path_unavailable", "Path does not exist or cannot be inspected.", current);
+    }
+    if (stat.isSymbolicLink()) {
+      throw new PhysicalPathError("reparse_path_rejected", "Symbolic-link and junction path components are not allowed.", current);
+    }
+    const currentReal = fs.realpathSync.native(current);
+    if (!isInside(rootReal, currentReal)) {
+      throw new PhysicalPathError("physical_boundary_rejected", "Resolved path escapes the configured root.", current);
+    }
+  }
+  const targetReal = fs.realpathSync.native(target);
+  if (!isInside(rootReal, targetReal)) {
+    throw new PhysicalPathError("physical_boundary_rejected", "Resolved path escapes the configured root.", target);
+  }
+  const targetStat = fs.lstatSync(target);
+  if (targetStat.isSymbolicLink()) {
+    throw new PhysicalPathError("reparse_path_rejected", "Symbolic-link and junction targets are not allowed.", target);
+  }
+  if (options.requireFile && !targetStat.isFile()) {
+    throw new PhysicalPathError("not_a_file", "Expected a regular file.", target);
+  }
+  if (options.requireDirectory && !targetStat.isDirectory()) {
+    throw new PhysicalPathError("not_a_directory", "Expected a directory.", target);
+  }
+  return { rootPath: root, rootRealPath: rootReal, targetPath: target, targetRealPath: targetReal };
+}
+function assertNoLinkedRootComponents(root) {
+  const anchor = path.parse(root).root;
+  const relative = path.relative(anchor, root);
+  let current = anchor;
+  for (const part of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch {
+      throw new PhysicalPathError("root_unavailable", "Configured root does not exist or cannot be inspected.", current);
+    }
+    if (stat.isSymbolicLink()) {
+      throw new PhysicalPathError("reparse_root_rejected", "No configured-root component may be a symbolic link or junction.", current);
+    }
+    if (!stat.isDirectory()) {
+      throw new PhysicalPathError("root_not_a_directory", "Every configured-root component must be a directory.", current);
+    }
+  }
+}
+function isInside(rootPath, candidatePath) {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return relative === "" || !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+function isNodeError(error51) {
+  return error51 instanceof Error && "code" in error51;
+}
+
+// godot-codex-bridge/mcp_server/src/config.ts
 var DEFAULT_ADDON_REQUEST_TIMEOUT_MS = 5e3;
 var DEFAULT_RUN_SCENE_TIMEOUT_MS = 15e3;
 function createServerConfig(overrides = {}) {
@@ -31271,7 +31530,7 @@ function createServerConfig(overrides = {}) {
     overrides.projectRoot ?? envOrArg("GODOT_CODEX_BRIDGE_PROJECT_ROOT", "--project-root") ?? discoverDefaultProjectRoot(process.cwd())
   );
   const bridgeDir = normalizePath(
-    overrides.bridgeDir ?? envOrArg("GODOT_CODEX_BRIDGE_DIR", "--bridge-dir") ?? path.join(projectRoot, ".godot", "godot_codex_bridge")
+    overrides.bridgeDir ?? envOrArg("GODOT_CODEX_BRIDGE_DIR", "--bridge-dir") ?? path2.join(projectRoot, ".godot", "godot_codex_bridge")
   );
   return {
     projectRoot,
@@ -31294,8 +31553,8 @@ function createServerConfig(overrides = {}) {
   };
 }
 function isInsidePath(root, candidate) {
-  const relative = path.relative(normalizePath(root), normalizePath(candidate));
-  return relative === "" || !relative.startsWith("..") && !path.isAbsolute(relative);
+  const relative = path2.relative(normalizePath(root), normalizePath(candidate));
+  return relative === "" || !relative.startsWith("..") && !path2.isAbsolute(relative);
 }
 function boundedNumber(value, min, max) {
   if (!Number.isFinite(value)) {
@@ -31327,25 +31586,26 @@ function argValue(name) {
   return void 0;
 }
 function discoverDefaultProjectRoot(cwd) {
-  if (fs.existsSync(path.join(cwd, "project.godot"))) {
+  if (fs2.existsSync(path2.join(cwd, "project.godot"))) {
     return cwd;
   }
-  const fixtureFromPackage = path.resolve(cwd, "..", "examples", "minimal_3d_project");
-  if (fs.existsSync(path.join(fixtureFromPackage, "project.godot"))) {
+  const fixtureFromPackage = path2.resolve(cwd, "..", "examples", "minimal_3d_project");
+  if (fs2.existsSync(path2.join(fixtureFromPackage, "project.godot"))) {
     return fixtureFromPackage;
   }
   return cwd;
 }
 function normalizePath(value) {
-  return path.resolve(value);
+  return path2.resolve(value);
 }
 function discoverHostRpcUrl(projectRoot) {
-  const configPath = path.join(projectRoot, "addons", "godot_codex_bridge", "host_config.json");
-  if (!fs.existsSync(configPath)) {
+  const configPath = path2.join(projectRoot, "addons", "godot_codex_bridge", "host_config.json");
+  if (!fs2.existsSync(configPath)) {
     return null;
   }
   try {
-    const parsed = JSON.parse(stripUtf8Bom(fs.readFileSync(configPath, "utf8")));
+    const text = readFileInsideRootBoundedSync(projectRoot, configPath, 64 * 1024).toString("utf8");
+    const parsed = JSON.parse(stripUtf8Bom(text));
     const port = Number(parsed.port);
     if (!Number.isFinite(port) || port <= 0) {
       return null;
@@ -31392,17 +31652,17 @@ function findGodotOnPath(pathEnv = process.env.PATH, rejectedRoot) {
   const candidateNames = process.platform === "win32" ? ["godot.exe", "godot4.exe", "Godot.exe", "Godot4.exe", "Godot_console.exe"] : ["godot", "godot4", "Godot", "Godot4"];
   const dirs = pathEnv.split(delimiter).map((d) => d.trim()).filter(Boolean);
   for (const dir of dirs) {
-    if (!path.isAbsolute(dir)) {
+    if (!path2.isAbsolute(dir)) {
       continue;
     }
     for (const name of candidateNames) {
-      const candidatePath = path.resolve(dir, name);
+      const candidatePath = path2.resolve(dir, name);
       if (rejectedRoot && isInsidePath(rejectedRoot, candidatePath)) {
         continue;
       }
       try {
-        if (fs.existsSync(candidatePath)) {
-          const stat = fs.statSync(candidatePath);
+        if (fs2.existsSync(candidatePath)) {
+          const stat = fs2.statSync(candidatePath);
           if (stat.isFile()) {
             return candidatePath;
           }
@@ -31416,243 +31676,11 @@ function findGodotOnPath(pathEnv = process.env.PATH, rejectedRoot) {
 
 // godot-codex-bridge/mcp_server/src/tools.ts
 import fs12 from "node:fs/promises";
-import path14 from "node:path";
+import path15 from "node:path";
 
 // godot-codex-bridge/mcp_server/src/annotations.ts
 import fs3 from "node:fs/promises";
 import path3 from "node:path";
-
-// godot-codex-bridge/mcp_server/src/physicalPath.ts
-import fs2 from "node:fs";
-import path2 from "node:path";
-var PhysicalPathError = class extends Error {
-  constructor(code, message, targetPath) {
-    super(message);
-    this.code = code;
-    this.targetPath = targetPath;
-    this.name = "PhysicalPathError";
-  }
-  code;
-  targetPath;
-};
-function ensureDirectoryInsideRootSync(rootPath, directoryPath) {
-  const root = path2.resolve(rootPath);
-  const directory = path2.resolve(directoryPath);
-  assertPhysicalPathSync(root, root, { requireDirectory: true });
-  if (!isInside(root, directory)) {
-    throw new PhysicalPathError("path_boundary_rejected", "Directory is outside the configured root.", directory);
-  }
-  const relative = path2.relative(root, directory);
-  const parts = relative === "" ? [] : relative.split(path2.sep).filter(Boolean);
-  let current = root;
-  for (const part of parts) {
-    current = path2.join(current, part);
-    try {
-      assertPhysicalPathSync(root, current, { requireDirectory: true });
-      continue;
-    } catch (error51) {
-      if (!(error51 instanceof PhysicalPathError) || error51.code !== "path_unavailable" && error51.code !== "root_unavailable") {
-        throw error51;
-      }
-    }
-    try {
-      fs2.mkdirSync(current);
-    } catch (error51) {
-      if (!isNodeError(error51) || error51.code !== "EEXIST") {
-        throw error51;
-      }
-    }
-    assertPhysicalPathSync(root, current, { requireDirectory: true });
-  }
-}
-function writeFileInsideRootSync(rootPath, targetPath, data) {
-  const target = path2.resolve(targetPath);
-  ensureDirectoryInsideRootSync(rootPath, path2.dirname(target));
-  try {
-    assertPhysicalPathSync(rootPath, target, { requireFile: true });
-    throw new PhysicalPathError("target_exists", "Refusing to overwrite an existing file through the confined artifact writer.", target);
-  } catch (error51) {
-    if (!(error51 instanceof PhysicalPathError) || error51.code !== "path_unavailable") {
-      throw error51;
-    }
-    assertPhysicalPathSync(rootPath, target, { allowMissingLeaf: true });
-  }
-  const noFollow = process.platform === "win32" ? 0 : fs2.constants.O_NOFOLLOW;
-  const descriptor = fs2.openSync(target, fs2.constants.O_CREAT | fs2.constants.O_EXCL | fs2.constants.O_WRONLY | noFollow, 384);
-  try {
-    const opened = fs2.fstatSync(descriptor);
-    const current = fs2.statSync(target);
-    if (!opened.isFile() || opened.ino !== current.ino || opened.dev !== current.dev) {
-      throw new PhysicalPathError("file_identity_changed", "File identity changed while it was being opened for writing.", target);
-    }
-    assertPhysicalPathSync(rootPath, target, { requireFile: true });
-    fs2.writeFileSync(descriptor, data);
-    fs2.fsyncSync(descriptor);
-    assertPhysicalPathSync(rootPath, target, { requireFile: true });
-  } finally {
-    fs2.closeSync(descriptor);
-  }
-}
-function readFileInsideRootSync(rootPath, targetPath) {
-  const descriptor = openFileInsideRootSync(rootPath, targetPath);
-  try {
-    const before = fs2.fstatSync(descriptor);
-    if (!before.isFile()) {
-      throw new PhysicalPathError("not_a_file", "Expected a regular file.", targetPath);
-    }
-    const bytes = fs2.readFileSync(descriptor);
-    const after = fs2.fstatSync(descriptor);
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) {
-      throw new PhysicalPathError("file_changed_during_read", "File changed while it was being read.", targetPath);
-    }
-    assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
-    return bytes;
-  } finally {
-    fs2.closeSync(descriptor);
-  }
-}
-function readFileInsideRootBoundedSync(rootPath, targetPath, maxBytes) {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
-    throw new PhysicalPathError("invalid_read_limit", "Bounded file reads require a non-negative integer byte limit.", targetPath);
-  }
-  const descriptor = openFileInsideRootSync(rootPath, targetPath);
-  try {
-    const before = fs2.fstatSync(descriptor);
-    if (!before.isFile()) {
-      throw new PhysicalPathError("not_a_file", "Expected a regular file.", targetPath);
-    }
-    if (before.size > maxBytes) {
-      throw new PhysicalPathError("file_too_large", `File exceeds the ${maxBytes}-byte read limit.`, targetPath);
-    }
-    const buffer = Buffer.alloc(Math.min(maxBytes + 1, before.size + 1));
-    let bytesRead = 0;
-    while (bytesRead < buffer.length) {
-      const count = fs2.readSync(descriptor, buffer, bytesRead, buffer.length - bytesRead, bytesRead);
-      if (count === 0) {
-        break;
-      }
-      bytesRead += count;
-    }
-    if (bytesRead > maxBytes) {
-      throw new PhysicalPathError("file_too_large", `File exceeds the ${maxBytes}-byte read limit.`, targetPath);
-    }
-    const after = fs2.fstatSync(descriptor);
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) {
-      throw new PhysicalPathError("file_changed_during_read", "File changed while it was being read.", targetPath);
-    }
-    assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
-    return buffer.subarray(0, bytesRead);
-  } finally {
-    fs2.closeSync(descriptor);
-  }
-}
-function openFileInsideRootSync(rootPath, targetPath) {
-  assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
-  const noFollow = process.platform === "win32" ? 0 : fs2.constants.O_NOFOLLOW;
-  const descriptor = fs2.openSync(targetPath, fs2.constants.O_RDONLY | noFollow);
-  try {
-    assertPhysicalPathSync(rootPath, targetPath, { requireFile: true });
-    const opened = fs2.fstatSync(descriptor);
-    const current = fs2.statSync(targetPath);
-    if (!opened.isFile() || opened.size !== current.size || opened.ino !== current.ino || opened.dev !== current.dev) {
-      throw new PhysicalPathError("file_identity_changed", "File identity changed while it was being opened.", targetPath);
-    }
-    return descriptor;
-  } catch (error51) {
-    fs2.closeSync(descriptor);
-    throw error51;
-  }
-}
-function assertPhysicalPathSync(rootPath, targetPath, options = {}) {
-  const root = path2.resolve(rootPath);
-  const target = path2.resolve(targetPath);
-  if (!isInside(root, target)) {
-    throw new PhysicalPathError("path_boundary_rejected", "Path is outside the configured root.", target);
-  }
-  let rootReal;
-  try {
-    assertNoLinkedRootComponents(root);
-    const rootStat = fs2.lstatSync(root);
-    if (rootStat.isSymbolicLink()) {
-      throw new PhysicalPathError("reparse_root_rejected", "The configured root cannot be a symbolic link or junction.", root);
-    }
-    if (!rootStat.isDirectory()) {
-      throw new PhysicalPathError("root_not_a_directory", "The configured root must be a directory.", root);
-    }
-    rootReal = fs2.realpathSync.native(root);
-  } catch (error51) {
-    if (error51 instanceof PhysicalPathError) {
-      throw error51;
-    }
-    throw new PhysicalPathError("root_unavailable", "Configured root does not exist or cannot be resolved.", root);
-  }
-  const relative = path2.relative(root, target);
-  const parts = relative === "" ? [] : relative.split(path2.sep).filter(Boolean);
-  let current = root;
-  for (let index = 0; index < parts.length; index += 1) {
-    current = path2.join(current, parts[index]);
-    let stat;
-    try {
-      stat = fs2.lstatSync(current);
-    } catch (error51) {
-      if (isNodeError(error51) && error51.code === "ENOENT" && (options.allowMissingTail || options.allowMissingLeaf && index === parts.length - 1)) {
-        return { rootPath: root, rootRealPath: rootReal, targetPath: target, targetRealPath: null };
-      }
-      throw new PhysicalPathError("path_unavailable", "Path does not exist or cannot be inspected.", current);
-    }
-    if (stat.isSymbolicLink()) {
-      throw new PhysicalPathError("reparse_path_rejected", "Symbolic-link and junction path components are not allowed.", current);
-    }
-    const currentReal = fs2.realpathSync.native(current);
-    if (!isInside(rootReal, currentReal)) {
-      throw new PhysicalPathError("physical_boundary_rejected", "Resolved path escapes the configured root.", current);
-    }
-  }
-  const targetReal = fs2.realpathSync.native(target);
-  if (!isInside(rootReal, targetReal)) {
-    throw new PhysicalPathError("physical_boundary_rejected", "Resolved path escapes the configured root.", target);
-  }
-  const targetStat = fs2.lstatSync(target);
-  if (targetStat.isSymbolicLink()) {
-    throw new PhysicalPathError("reparse_path_rejected", "Symbolic-link and junction targets are not allowed.", target);
-  }
-  if (options.requireFile && !targetStat.isFile()) {
-    throw new PhysicalPathError("not_a_file", "Expected a regular file.", target);
-  }
-  if (options.requireDirectory && !targetStat.isDirectory()) {
-    throw new PhysicalPathError("not_a_directory", "Expected a directory.", target);
-  }
-  return { rootPath: root, rootRealPath: rootReal, targetPath: target, targetRealPath: targetReal };
-}
-function assertNoLinkedRootComponents(root) {
-  const anchor = path2.parse(root).root;
-  const relative = path2.relative(anchor, root);
-  let current = anchor;
-  for (const part of relative.split(path2.sep).filter(Boolean)) {
-    current = path2.join(current, part);
-    let stat;
-    try {
-      stat = fs2.lstatSync(current);
-    } catch {
-      throw new PhysicalPathError("root_unavailable", "Configured root does not exist or cannot be inspected.", current);
-    }
-    if (stat.isSymbolicLink()) {
-      throw new PhysicalPathError("reparse_root_rejected", "No configured-root component may be a symbolic link or junction.", current);
-    }
-    if (!stat.isDirectory()) {
-      throw new PhysicalPathError("root_not_a_directory", "Every configured-root component must be a directory.", current);
-    }
-  }
-}
-function isInside(rootPath, candidatePath) {
-  const relative = path2.relative(path2.resolve(rootPath), path2.resolve(candidatePath));
-  return relative === "" || !relative.startsWith("..") && !path2.isAbsolute(relative);
-}
-function isNodeError(error51) {
-  return error51 instanceof Error && "code" in error51;
-}
-
-// godot-codex-bridge/mcp_server/src/annotations.ts
 var ANNOTATIONS_DIR = path3.join("artifacts", "annotations");
 var MAX_ANNOTATION_JSON_BYTES = 256e3;
 var MAX_ANNOTATIONS_RETURNED = 100;
@@ -32002,23 +32030,34 @@ async function applyApprovedDiff(_projectRoot, _bridgeDir, _options) {
 }
 
 // godot-codex-bridge/mcp_server/src/bridge.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import fs5 from "node:fs/promises";
-import path5 from "node:path";
+import path6 from "node:path";
 
 // godot-codex-bridge/mcp_server/src/status.ts
 import fs4 from "node:fs/promises";
+import path5 from "node:path";
+
+// godot-codex-bridge/mcp_server/src/projectIdentity.ts
+import crypto from "node:crypto";
 import path4 from "node:path";
+function projectIdentityHash(value, platform = process.platform) {
+  let normalized = path4.resolve(value).replace(/\\/g, "/").replace(/\/+$/, "");
+  if (platform === "win32") normalized = normalized.toLowerCase();
+  return crypto.createHash("sha256").update(`godot-codex-bridge-project-v1:${normalized}`).digest("hex");
+}
+
+// godot-codex-bridge/mcp_server/src/status.ts
 var HEARTBEAT_STALE_MS = 5e3;
 var SNAPSHOT_STALE_MS = 6e4;
 async function getBridgeStatus(config2, options = {}) {
   const now = options.now ?? /* @__PURE__ */ new Date();
-  const projectFile = path4.join(config2.projectRoot, "project.godot");
-  const addonPath = path4.join(config2.projectRoot, "addons", "godot_codex_bridge");
-  const pluginCfgPath = path4.join(addonPath, "plugin.cfg");
-  const snapshotPath = path4.join(config2.bridgeDir, "context_snapshot.json");
-  const heartbeatPath = path4.join(config2.bridgeDir, "heartbeat.json");
-  const bridgeStatePath = path4.join(config2.bridgeDir, "bridge_state.json");
+  const projectFile = path5.join(config2.projectRoot, "project.godot");
+  const addonPath = path5.join(config2.projectRoot, "addons", "godot_codex_bridge");
+  const pluginCfgPath = path5.join(addonPath, "plugin.cfg");
+  const snapshotPath = path5.join(config2.bridgeDir, "context_snapshot.json");
+  const heartbeatPath = path5.join(config2.bridgeDir, "heartbeat.json");
+  const bridgeStatePath = path5.join(config2.bridgeDir, "bridge_state.json");
   const [
     projectFileExists,
     addonPathExists,
@@ -32061,14 +32100,17 @@ async function getBridgeStatus(config2, options = {}) {
   const snapshotSchemaCandidate = isJsonObject2(snapshot);
   const hostProjectRoot = stringAt(hostHealth, ["activeProject", "projectRoot"]);
   const hostBridgeDir = stringAt(hostHealth, ["activeProject", "bridgeDir"]);
+  const hostProjectHash = stringAt(hostHealth, ["project_identity", "project_root_sha256"]);
+  const hostBridgeDirHash = stringAt(hostHealth, ["project_identity", "bridge_dir_sha256"]);
   const projectIdentity = {
     editorProjectRoot: config2.projectRoot,
     hostProjectRoot,
     editorBridgeDir: config2.bridgeDir,
     hostBridgeDir,
     hostStatusAvailable: hostHealth !== void 0,
-    matches: hostProjectRoot === null ? null : samePath(config2.projectRoot, hostProjectRoot),
-    bridgeDirMatches: hostBridgeDir === null ? null : samePath(config2.bridgeDir, hostBridgeDir)
+    identitySource: hostProjectRoot !== null ? "path" : hostProjectHash !== null ? "hash" : null,
+    matches: hostProjectRoot !== null ? samePath(config2.projectRoot, hostProjectRoot) : hostProjectHash !== null ? projectIdentityHash(config2.projectRoot) === hostProjectHash : null,
+    bridgeDirMatches: hostBridgeDir !== null ? samePath(config2.bridgeDir, hostBridgeDir) : hostBridgeDirHash !== null ? projectIdentityHash(config2.bridgeDir) === hostBridgeDirHash : null
   };
   const projectMismatch = projectIdentity.matches === false || projectIdentity.bridgeDirMatches === false;
   const checks = {
@@ -32296,8 +32338,8 @@ function stringAt(value, pathSegments) {
   return typeof current === "string" ? current : null;
 }
 function samePath(left, right) {
-  const normalizedLeft = path4.resolve(left);
-  const normalizedRight = path4.resolve(right);
+  const normalizedLeft = path5.resolve(left);
+  const normalizedRight = path5.resolve(right);
   return process.platform === "win32" ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase() : normalizedLeft === normalizedRight;
 }
 function isJsonObject2(value) {
@@ -32311,6 +32353,24 @@ var SNAPSHOT_FILENAMES = [
   "context.json",
   "latest_context.json"
 ];
+var HOST_RPC_UNDELIVERED_STATUSES = /* @__PURE__ */ new Set([403, 404]);
+var HOST_RPC_UNDELIVERED_CODES = /* @__PURE__ */ new Set([
+  "bridge_rpc_unavailable",
+  "addon_not_connected",
+  "project_not_attached",
+  "project_mismatch",
+  "bridge_dir_mismatch",
+  "request_required",
+  "request_id_required",
+  "invalid_json_body",
+  "message_too_large"
+]);
+var CONNECTION_NEVER_ESTABLISHED_CODES = /* @__PURE__ */ new Set(["ECONNREFUSED", "ENOTFOUND", "EADDRNOTAVAIL", "EHOSTUNREACH", "ENETUNREACH"]);
+function isConnectionNeverEstablished(error51) {
+  const cause = error51 instanceof Error ? error51.cause : void 0;
+  const code = cause && typeof cause === "object" ? cause.code : void 0;
+  return typeof code === "string" && CONNECTION_NEVER_ESTABLISHED_CODES.has(code);
+}
 var BridgeClient = class {
   constructor(config2) {
     this.config = config2;
@@ -32366,12 +32426,14 @@ var BridgeClient = class {
         bridge_status: status
       };
     }
-    const id = randomUUID();
+    const id = randomUUID2();
+    const createdAtMs = Date.now();
     const request = {
       protocol_version: "godot-codex-bridge/0.1",
       request_id: id,
       type,
-      created_at: (/* @__PURE__ */ new Date()).toISOString(),
+      created_at: new Date(createdAtMs).toISOString(),
+      deadline_at: new Date(createdAtMs + timeoutMs).toISOString(),
       payload
     };
     const transportAttempts = [];
@@ -32381,7 +32443,8 @@ var BridgeClient = class {
         transport: "websocket_rpc",
         status: "skipped",
         reason: "file_polling_required"
-      }
+      },
+      safeToFallback: true
     } : await this.tryHostRpcRequest(request, timeoutMs);
     transportAttempts.push(hostRpcResult.attempt);
     if (hostRpcResult.envelope) {
@@ -32390,13 +32453,25 @@ var BridgeClient = class {
         transport_attempts: transportAttempts
       };
     }
-    const requestsDir = path5.join(this.config.bridgeDir, "requests");
-    const responsesDir = path5.join(this.config.bridgeDir, "responses");
+    if (!hostRpcResult.safeToFallback) {
+      return {
+        status: "error",
+        transport: "websocket_rpc",
+        transport_attempts: transportAttempts,
+        request_id: id,
+        error: {
+          code: "outcome_unknown",
+          message: "Host request may have reached the addon. No file fallback was sent; inspect this request ID before retrying."
+        }
+      };
+    }
+    const requestsDir = path6.join(this.config.bridgeDir, "requests");
+    const responsesDir = path6.join(this.config.bridgeDir, "responses");
     ensureDirectoryInsideRootSync(this.config.projectRoot, requestsDir);
     ensureDirectoryInsideRootSync(this.config.projectRoot, responsesDir);
     const fileStartedAt = Date.now();
-    const requestPath = path5.join(requestsDir, `${id}.json`);
-    writeFileInsideRootSync(this.config.projectRoot, requestPath, `${JSON.stringify(request, null, 2)}
+    const requestPath = path6.join(requestsDir, `${id}.json`);
+    publishFileInsideRootSync(this.config.projectRoot, requestPath, `${JSON.stringify(request, null, 2)}
 `);
     const responsePath = await this.waitForResponse(id, timeoutMs);
     if (!responsePath) {
@@ -32415,13 +32490,18 @@ var BridgeClient = class {
         request_id: id,
         request_path: requestPath,
         error: {
-          code: "addon_request_timeout",
-          message: `Timed out waiting ${timeoutMs}ms for Godot addon response.`
+          code: "outcome_unknown",
+          message: `Timed out waiting ${timeoutMs}ms for Godot addon response. The action may have started; inspect this request ID before retrying.`
         }
       };
     }
-    const response = readJsonFile(this.config.projectRoot, responsePath);
-    if (!isJsonObject3(response)) {
+    let response;
+    try {
+      response = readJsonFile(this.config.projectRoot, responsePath);
+    } catch {
+      response = null;
+    }
+    if (!isJsonObject3(response) || response.request_id !== id) {
       transportAttempts.push({
         transport: "file_polling",
         status: "failed",
@@ -32430,7 +32510,7 @@ var BridgeClient = class {
         response_path: responsePath,
         error: {
           code: "invalid_addon_response",
-          message: "Addon response is not a JSON object."
+          message: "Addon response is malformed or has a mismatched request ID."
         }
       });
       return {
@@ -32442,7 +32522,7 @@ var BridgeClient = class {
         response_path: responsePath,
         error: {
           code: "invalid_addon_response",
-          message: "Addon response is not a JSON object."
+          message: "Addon response is malformed or has a mismatched request ID."
         }
       };
     }
@@ -32473,7 +32553,8 @@ var BridgeClient = class {
           transport: "websocket_rpc",
           status: "skipped",
           reason: "host_rpc_not_configured"
-        }
+        },
+        safeToFallback: true
       };
     }
     const startedAt = Date.now();
@@ -32489,7 +32570,9 @@ var BridgeClient = class {
           timeout_ms: timeoutMs,
           request
         }),
-        signal: controller.signal
+        signal: controller.signal,
+        // Never let a process on the Host port bounce the request elsewhere.
+        redirect: "error"
       });
       if (!response.ok) {
         const error51 = await responseError(response);
@@ -32502,7 +32585,8 @@ var BridgeClient = class {
             http_status: response.status,
             latency_ms: Date.now() - startedAt,
             error: error51
-          }
+          },
+          safeToFallback: HOST_RPC_UNDELIVERED_STATUSES.has(response.status) || typeof error51.code === "string" && HOST_RPC_UNDELIVERED_CODES.has(error51.code)
         };
       }
       const parsed = await response.json();
@@ -32519,10 +32603,25 @@ var BridgeClient = class {
               code: "host_rpc_invalid_response",
               message: "Host RPC response was not an ok envelope with an addon response object."
             }
-          }
+          },
+          safeToFallback: false
         };
       }
       const addonResponse = parsed.response;
+      if (parsed.request_id !== request.request_id || addonResponse.request_id !== request.request_id) {
+        return {
+          envelope: null,
+          attempt: {
+            transport: "websocket_rpc",
+            status: "failed",
+            host_rpc_url: url2,
+            http_status: response.status,
+            latency_ms: Date.now() - startedAt,
+            error: { code: "host_rpc_id_mismatch", message: "Host RPC response did not match the request ID." }
+          },
+          safeToFallback: false
+        };
+      }
       return {
         envelope: {
           status: isSuccessfulAddonStatus(addonResponse.status) ? "ok" : "error",
@@ -32536,7 +32635,8 @@ var BridgeClient = class {
           host_rpc_url: url2,
           http_status: response.status,
           latency_ms: Date.now() - startedAt
-        }
+        },
+        safeToFallback: false
       };
     } catch (error51) {
       return {
@@ -32550,7 +32650,10 @@ var BridgeClient = class {
             code: error51 instanceof DOMException && error51.name === "AbortError" ? "host_rpc_timeout" : "host_rpc_unavailable",
             message: error51 instanceof Error ? error51.message : String(error51)
           }
-        }
+        },
+        // A stopped Host refuses the TCP connection, so nothing was delivered.
+        // Timeouts and resets stay uncertain because the addon may have run it.
+        safeToFallback: isConnectionNeverEstablished(error51)
       };
     } finally {
       clearTimeout(timeout);
@@ -32558,7 +32661,7 @@ var BridgeClient = class {
   }
   async findFirstExisting(filenames) {
     for (const filename of filenames) {
-      const candidate = path5.join(this.config.bridgeDir, filename);
+      const candidate = path6.join(this.config.bridgeDir, filename);
       try {
         await fs5.access(candidate);
         return candidate;
@@ -32570,8 +32673,8 @@ var BridgeClient = class {
   async waitForResponse(id, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     const candidates = [
-      path5.join(this.config.bridgeDir, "responses", `${id}.json`),
-      path5.join(this.config.bridgeDir, "responses", `${id}.response.json`)
+      path6.join(this.config.bridgeDir, "responses", `${id}.json`),
+      path6.join(this.config.bridgeDir, "responses", `${id}.response.json`)
     ];
     while (Date.now() <= deadline) {
       for (const candidate of candidates) {
@@ -32593,7 +32696,7 @@ function bridgeUnavailable(config2, message) {
     error: {
       code: "bridge_unavailable",
       message,
-      expected_snapshot: path5.join(config2.bridgeDir, "context_snapshot.json")
+      expected_snapshot: path6.join(config2.bridgeDir, "context_snapshot.json")
     }
   };
 }
@@ -32648,7 +32751,7 @@ function fallbackReason(attempt) {
 
 // godot-codex-bridge/mcp_server/src/blenderImportManifest.ts
 import fs6 from "node:fs/promises";
-import path6 from "node:path";
+import path7 from "node:path";
 var ALLOWLIST_ROOT = "res://assets/ai_imports/blender";
 var SUPPORTED_ASSET_EXTENSIONS = [".glb", ".gltf", ".obj", ".fbx", ".dae", ".blend", ".tscn", ".scn", ".res", ".tres"];
 var MAX_ASSETS = 50;
@@ -32680,7 +32783,7 @@ async function planBlenderAssetImport(config2, args = {}) {
         max_bytes: MAX_MANIFEST_BYTES
       });
     }
-    manifestText = await fs6.readFile(manifestAbsPath, "utf8");
+    manifestText = readFileInsideRootBoundedSync(config2.projectRoot, manifestAbsPath, MAX_MANIFEST_BYTES).toString("utf8");
   } catch (error51) {
     return {
       status: "not_found",
@@ -32860,7 +32963,7 @@ function normalizeResPath(value) {
 }
 function resPathToAbsolute(projectRoot, resPath) {
   const resourcePath = resPath.slice("res://".length).replace(/\\/g, "/");
-  return path6.resolve(path6.resolve(projectRoot), ...resourcePath.split("/"));
+  return path7.resolve(path7.resolve(projectRoot), ...resourcePath.split("/"));
 }
 function copyTransform(rawAsset, target, key) {
   const value = rawAsset[key];
@@ -32933,16 +33036,16 @@ function codedErrorCode(error51) {
 }
 
 // godot-codex-bridge/mcp_server/src/diagnosticSnapshot.ts
-import path7 from "node:path";
+import path8 from "node:path";
 async function createDiagnosticSnapshot(projectRoot, bridgeDir, diagnostics, label) {
   if (diagnostics.status !== "ok") {
     return diagnostics;
   }
   const snapshotId = snapshotIdFor(label);
-  const snapshotRoot = path7.join(bridgeDir, "artifacts", "diagnostic_snapshots", snapshotId);
+  const snapshotRoot = path8.join(bridgeDir, "artifacts", "diagnostic_snapshots", snapshotId);
   ensureDirectoryInsideRootSync(projectRoot, snapshotRoot);
-  const diagnosticPath = path7.join(snapshotRoot, "inspect_3d_scene.json");
-  const manifestPath = path7.join(snapshotRoot, "manifest.json");
+  const diagnosticPath = path8.join(snapshotRoot, "inspect_3d_scene.json");
+  const manifestPath = path8.join(snapshotRoot, "manifest.json");
   writeFileInsideRootSync(projectRoot, diagnosticPath, `${JSON.stringify(diagnostics, null, 2)}
 `);
   const manifest = {
@@ -33095,15 +33198,16 @@ function numberOrDefault(value, fallback) {
 
 // godot-codex-bridge/mcp_server/src/exportReadiness.ts
 import fs7 from "node:fs/promises";
-import path8 from "node:path";
+import path9 from "node:path";
+var MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 var DESKTOP_PLATFORMS = ["windows desktop", "linux", "macos"];
 var MOBILE_PLATFORMS = ["android", "ios"];
 async function checkExportReadiness(projectRoot, godotExecutable) {
-  const projectFile = path8.join(projectRoot, "project.godot");
-  const exportPresetsFile = path8.join(projectRoot, "export_presets.cfg");
+  const projectFile = path9.join(projectRoot, "project.godot");
+  const exportPresetsFile = path9.join(projectRoot, "export_presets.cfg");
   const findings = [];
-  const projectText = await readTextIfExists2(projectFile);
-  const exportPresetsText = await readTextIfExists2(exportPresetsFile);
+  const projectText = readTextIfExists2(projectRoot, projectFile);
+  const exportPresetsText = readTextIfExists2(projectRoot, exportPresetsFile);
   const projectSettings = projectText ? parseGodotConfig(projectText) : {};
   const presets = exportPresetsText ? parseExportPresets(exportPresetsText) : [];
   if (!projectText) {
@@ -33251,12 +33355,12 @@ function resolveResPath(projectRoot, value) {
   if (!value.startsWith("res://")) {
     return null;
   }
-  const candidate = path8.resolve(projectRoot, value.slice("res://".length));
+  const candidate = path9.resolve(projectRoot, value.slice("res://".length));
   return isInsidePath(projectRoot, candidate) ? candidate : null;
 }
-async function readTextIfExists2(filePath) {
+function readTextIfExists2(projectRoot, filePath) {
   try {
-    return await fs7.readFile(filePath, "utf8");
+    return readFileInsideRootBoundedSync(projectRoot, filePath, MAX_CONFIG_BYTES).toString("utf8");
   } catch {
     return void 0;
   }
@@ -33301,7 +33405,7 @@ function stringOrNull3(value) {
 
 // godot-codex-bridge/mcp_server/src/diffPreview.ts
 import { createHash } from "node:crypto";
-import path9 from "node:path";
+import path10 from "node:path";
 
 // godot-codex-bridge/mcp_server/node_modules/diff/libesm/diff/base.js
 var Diff = class {
@@ -33403,16 +33507,16 @@ var Diff = class {
       }
     }
   }
-  addToPath(path15, added, removed, oldPosInc, options) {
-    const last = path15.lastComponent;
+  addToPath(path16, added, removed, oldPosInc, options) {
+    const last = path16.lastComponent;
     if (last && !options.oneChangePerToken && last.added === added && last.removed === removed) {
       return {
-        oldPos: path15.oldPos + oldPosInc,
+        oldPos: path16.oldPos + oldPosInc,
         lastComponent: { count: last.count + 1, added, removed, previousComponent: last.previousComponent }
       };
     } else {
       return {
-        oldPos: path15.oldPos + oldPosInc,
+        oldPos: path16.oldPos + oldPosInc,
         lastComponent: { count: 1, added, removed, previousComponent: last }
       };
     }
@@ -33838,12 +33942,12 @@ function resolvePreviewTarget(projectRoot, targetPath) {
   if (!targetPath || targetPath.trim() === "") {
     throw new PreviewDiffError("empty_path", "Target path is required.");
   }
-  if (path9.isAbsolute(targetPath) || /^[A-Za-z]:[\\/]/.test(targetPath)) {
+  if (path10.isAbsolute(targetPath) || /^[A-Za-z]:[\\/]/.test(targetPath)) {
     throw new PreviewDiffError("absolute_path_rejected", "Use a project-relative path, not an absolute path.");
   }
   const withoutResPrefix = targetPath.startsWith("res://") ? targetPath.slice("res://".length) : targetPath;
-  const normalized = path9.normalize(withoutResPrefix.replaceAll("/", path9.sep));
-  if (normalized === "." || normalized.startsWith(`..${path9.sep}`) || normalized === ".." || path9.isAbsolute(normalized)) {
+  const normalized = path10.normalize(withoutResPrefix.replaceAll("/", path10.sep));
+  if (normalized === "." || normalized.startsWith(`..${path10.sep}`) || normalized === ".." || path10.isAbsolute(normalized)) {
     throw new PreviewDiffError("path_traversal_rejected", "Path traversal outside the project is not allowed.");
   }
   const segments = normalized.split(/[\\/]+/).map((segment) => segment.toLowerCase());
@@ -33853,7 +33957,7 @@ function resolvePreviewTarget(projectRoot, targetPath) {
       segment: blockedSegment
     });
   }
-  const extension = path9.extname(normalized).toLowerCase();
+  const extension = path10.extname(normalized).toLowerCase();
   if (extension === ".import" || BINARY_EXTENSIONS.has(extension)) {
     throw new PreviewDiffError("binary_path_rejected", "Binary/import files are not diff-preview targets.", {
       extension
@@ -33864,12 +33968,12 @@ function resolvePreviewTarget(projectRoot, targetPath) {
       extension
     });
   }
-  const absolutePath = path9.resolve(projectRoot, normalized);
+  const absolutePath = path10.resolve(projectRoot, normalized);
   if (!isInsidePath(projectRoot, absolutePath)) {
     throw new PreviewDiffError("path_boundary_rejected", "Resolved path is outside the configured project root.");
   }
   return {
-    relativePath: normalized.replaceAll(path9.sep, "/"),
+    relativePath: normalized.replaceAll(path10.sep, "/"),
     absolutePath
   };
 }
@@ -33909,7 +34013,7 @@ function isNodeError2(error51) {
 import { createHash as createHash2 } from "node:crypto";
 import { closeSync, createReadStream, readSync } from "node:fs";
 import fs8 from "node:fs/promises";
-import path10 from "node:path";
+import path11 from "node:path";
 import { createInterface } from "node:readline";
 var MAX_INDEX_FILES = 2e4;
 var MAX_INDEX_ENTRIES = 8e4;
@@ -34038,7 +34142,7 @@ var ProjectAwarenessError = class extends Error {
 };
 async function getProjectOverview(projectRoot, source = {}) {
   try {
-    const projectFile = path10.join(projectRoot, "project.godot");
+    const projectFile = path11.join(projectRoot, "project.godot");
     const projectText = await readTextIfExists3(projectRoot, projectFile);
     const projectConfig = parseProjectConfig(projectText);
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
@@ -34078,7 +34182,7 @@ async function getProjectOverview(projectRoot, source = {}) {
 }
 async function getProjectMap(projectRoot, source = {}) {
   try {
-    const projectFile = path10.join(projectRoot, "project.godot");
+    const projectFile = path11.join(projectRoot, "project.godot");
     const projectText = await readTextIfExists3(projectRoot, projectFile);
     const projectConfig = parseProjectConfig(projectText);
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
@@ -34265,7 +34369,7 @@ async function getProjectSceneGraph(projectRoot, options = {}) {
 }
 async function getProjectScriptMap(projectRoot, options = {}) {
   try {
-    const projectFile = path10.join(projectRoot, "project.godot");
+    const projectFile = path11.join(projectRoot, "project.godot");
     const projectText = await readTextIfExists3(projectRoot, projectFile);
     const projectConfig = parseProjectConfig(projectText);
     const focusedScript = typeof options.scriptPath === "string" && options.scriptPath.trim() !== "" ? resolveProjectPath(projectRoot, options.scriptPath) : null;
@@ -34488,7 +34592,7 @@ async function getAgentsContext(projectRoot) {
       status: "ok",
       awareness_version: "godot-codex-bridge/project-awareness-v1",
       project_root: projectRoot,
-      root_agents_path: path10.join(projectRoot, "AGENTS.md"),
+      root_agents_path: path11.join(projectRoot, "AGENTS.md"),
       root_agents_present: agents.rootAgentsPresent,
       root_agents_missing: !agents.rootAgentsPresent,
       files_count: agents.files.length,
@@ -34504,7 +34608,7 @@ async function getAgentsContext(projectRoot) {
 async function getSceneFileTree(projectRoot, options = {}, source = {}) {
   try {
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
-    const requestedScene = typeof options.scenePath === "string" && options.scenePath.trim() !== "" ? options.scenePath : currentScenePath(snapshot) ?? parseProjectConfig(await readTextIfExists3(projectRoot, path10.join(projectRoot, "project.godot"))).mainScene;
+    const requestedScene = typeof options.scenePath === "string" && options.scenePath.trim() !== "" ? options.scenePath : currentScenePath(snapshot) ?? parseProjectConfig(await readTextIfExists3(projectRoot, path11.join(projectRoot, "project.godot"))).mainScene;
     if (!requestedScene) {
       return {
         status: "not_found",
@@ -34524,7 +34628,7 @@ async function getSceneFileTree(projectRoot, options = {}, source = {}) {
 async function getCurrentSourceContext(projectRoot, source = {}) {
   try {
     const snapshot = snapshotFromEnvelope(source.snapshotEnvelope);
-    const projectConfig = parseProjectConfig(await readTextIfExists3(projectRoot, path10.join(projectRoot, "project.godot")));
+    const projectConfig = parseProjectConfig(await readTextIfExists3(projectRoot, path11.join(projectRoot, "project.godot")));
     const scenePath = currentScenePath(snapshot) ?? projectConfig.mainScene ?? null;
     const sceneTree = scenePath ? await parseSceneFile(projectRoot, scenePath) : null;
     const scripts = collectCurrentScriptPaths(snapshot, sceneTree);
@@ -34595,7 +34699,7 @@ function projectAwarenessErrorEnvelope(error51) {
 }
 async function buildProjectIndex(projectRoot, options = {}) {
   const rootPath = options.rootPath ?? "";
-  const rootAbsolutePath = rootPath ? path10.resolve(projectRoot, pathFromRelative(rootPath)) : projectRoot;
+  const rootAbsolutePath = rootPath ? path11.resolve(projectRoot, pathFromRelative(rootPath)) : projectRoot;
   if (!isInsidePath(projectRoot, rootAbsolutePath)) {
     throw new ProjectAwarenessError("path_boundary_rejected", "Resolved path is outside the configured project root.");
   }
@@ -34681,7 +34785,7 @@ async function buildProjectIndex(projectRoot, options = {}) {
         stopIndexing("project_index_file_budget_reached");
         return;
       }
-      const absolutePath = path10.join(currentAbsolutePath, entry2.name);
+      const absolutePath = path11.join(currentAbsolutePath, entry2.name);
       const relativePath = toProjectRelative(projectRoot, absolutePath);
       const blocked = blockedReasonFor(relativePath);
       if (blocked) {
@@ -34724,7 +34828,7 @@ async function buildProjectIndex(projectRoot, options = {}) {
   return { files, rootPath, truncated, truncationReason, scannedFiles, traversedEntries, traversedDirectories, skipped };
 }
 async function indexedFileFromStat(projectRoot, relativePath, absolutePath, stat) {
-  const extension = path10.posix.extname(relativePath).toLowerCase();
+  const extension = path11.posix.extname(relativePath).toLowerCase();
   const text = await classifyTextFile(projectRoot, absolutePath, extension, stat.size);
   return {
     relativePath,
@@ -34808,7 +34912,7 @@ function resolveProjectPath(projectRoot, requestedPath, options = {}) {
   if (isAnyAbsolutePath(withoutResPrefix)) {
     throw new ProjectAwarenessError("absolute_path_rejected", "Use a res:// or project-relative path, not an absolute path.");
   }
-  const normalized = path10.posix.normalize(withoutResPrefix.replaceAll("\\", "/"));
+  const normalized = path11.posix.normalize(withoutResPrefix.replaceAll("\\", "/"));
   if (normalized === ".") {
     if (options.allowRoot) {
       return {
@@ -34819,7 +34923,7 @@ function resolveProjectPath(projectRoot, requestedPath, options = {}) {
     }
     throw new ProjectAwarenessError("empty_path", "Project-relative file path is required.");
   }
-  if (normalized === ".." || normalized.startsWith("../") || path10.posix.isAbsolute(normalized)) {
+  if (normalized === ".." || normalized.startsWith("../") || path11.posix.isAbsolute(normalized)) {
     throw new ProjectAwarenessError("path_traversal_rejected", "Path traversal outside the project is not allowed.");
   }
   const blocked = blockedReasonFor(normalized);
@@ -34828,7 +34932,7 @@ function resolveProjectPath(projectRoot, requestedPath, options = {}) {
       path: normalized
     });
   }
-  const absolutePath = path10.resolve(projectRoot, pathFromRelative(normalized));
+  const absolutePath = path11.resolve(projectRoot, pathFromRelative(normalized));
   if (!isInsidePath(projectRoot, absolutePath)) {
     throw new ProjectAwarenessError("path_boundary_rejected", "Resolved path is outside the configured project root.");
   }
@@ -34873,7 +34977,20 @@ function blockedReasonFor(relativePath) {
       message: `Generated or third-party assistant addon path is excluded: ${blockedPrefix}.`
     };
   }
+  const fileName = segments[segments.length - 1]?.toLowerCase() ?? "";
+  if (isSecretFileName(fileName)) {
+    return {
+      code: "secret_path_rejected",
+      message: "Files that commonly hold secrets (env files, keys, keystores, credentials) are not readable through project awareness tools."
+    };
+  }
   return null;
+}
+var SECRET_FILE_NAMES = /* @__PURE__ */ new Set([".npmrc", ".pypirc", ".netrc", "auth.json", "export_credentials.cfg"]);
+var SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".secret", ".secrets"];
+function isSecretFileName(fileName) {
+  const name = fileName.toLowerCase();
+  return name === ".env" || name.startsWith(".env.") || SECRET_FILE_NAMES.has(name) || SECRET_EXTENSIONS.some((extension) => name.endsWith(extension)) || /^id_(rsa|dsa|ecdsa|ed25519)(\.|$)/.test(name) || /^(credentials|secrets?)(\.|$)/.test(name);
 }
 function blockedPathPolicy() {
   return {
@@ -34885,13 +35002,13 @@ function blockedPathPolicy() {
   };
 }
 function isAnyAbsolutePath(value) {
-  return path10.isAbsolute(value) || path10.win32.isAbsolute(value) || path10.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value);
+  return path11.isAbsolute(value) || path11.win32.isAbsolute(value) || path11.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value);
 }
 function pathFromRelative(relativePath) {
-  return relativePath.split("/").join(path10.sep);
+  return relativePath.split("/").join(path11.sep);
 }
 function toProjectRelative(projectRoot, absolutePath) {
-  return path10.relative(projectRoot, absolutePath).replaceAll(path10.sep, "/");
+  return path11.relative(projectRoot, absolutePath).replaceAll(path11.sep, "/");
 }
 function fileMetadata(file2) {
   return {
@@ -35443,7 +35560,7 @@ function filterScriptMapEntry(script, options) {
   return filtered;
 }
 async function collectProjectDocPreviews(projectRoot, index) {
-  const candidates = index.files.filter((file2) => file2.kind === "doc" && file2.isText).filter((file2) => path10.posix.basename(file2.relativePath).toLowerCase() !== "agents.md").sort((a, b) => pathDepth(a.relativePath) - pathDepth(b.relativePath) || a.relativePath.localeCompare(b.relativePath)).slice(0, MAX_PROJECT_SCRIPT_MAP_DOCS);
+  const candidates = index.files.filter((file2) => file2.kind === "doc" && file2.isText).filter((file2) => path11.posix.basename(file2.relativePath).toLowerCase() !== "agents.md").sort((a, b) => pathDepth(a.relativePath) - pathDepth(b.relativePath) || a.relativePath.localeCompare(b.relativePath)).slice(0, MAX_PROJECT_SCRIPT_MAP_DOCS);
   const docs = [];
   for (const file2 of candidates) {
     const metadata = await fileMetadataWithSmallSha(projectRoot, file2);
@@ -35567,7 +35684,7 @@ function graphNodeKind(pathValue, edgeKind, resourceType) {
   return "resource";
 }
 function isSceneResPath(value) {
-  const extension = path10.posix.extname(value.replaceAll("\\", "/")).toLowerCase();
+  const extension = path11.posix.extname(value.replaceAll("\\", "/")).toLowerCase();
   return value.startsWith("res://") && [".tscn", ".scn"].includes(extension);
 }
 function normalizeGraphPath(value) {
@@ -35809,7 +35926,7 @@ async function readBoundedLines(projectRoot, absolutePath, startLine, maxLines, 
 }
 async function collectAgentsFiles(projectRoot, includePreview = false) {
   const index = await buildProjectIndex(projectRoot);
-  const agents = index.files.filter((file2) => path10.posix.basename(file2.relativePath).toLowerCase() === "agents.md").sort((a, b) => pathDepth(a.relativePath) - pathDepth(b.relativePath) || a.relativePath.localeCompare(b.relativePath));
+  const agents = index.files.filter((file2) => path11.posix.basename(file2.relativePath).toLowerCase() === "agents.md").sort((a, b) => pathDepth(a.relativePath) - pathDepth(b.relativePath) || a.relativePath.localeCompare(b.relativePath));
   const files = [];
   for (let i = 0; i < agents.length; i += 1) {
     const file2 = agents[i];
@@ -35817,7 +35934,7 @@ async function collectAgentsFiles(projectRoot, includePreview = false) {
     const item = {
       ...metadata,
       precedence: i + 1,
-      scope_directory: path10.posix.dirname(file2.relativePath) === "." ? "" : path10.posix.dirname(file2.relativePath)
+      scope_directory: path11.posix.dirname(file2.relativePath) === "." ? "" : path11.posix.dirname(file2.relativePath)
     };
     if (includePreview) {
       const preview = await readBoundedLines(projectRoot, file2.absolutePath, 1, MAX_AGENTS_PREVIEW_LINES, MAX_AGENTS_PREVIEW_BYTES);
@@ -35845,7 +35962,7 @@ function agentsMetadata(file2) {
 }
 async function parseSceneFile(projectRoot, scenePath) {
   const resolved = resolveProjectPath(projectRoot, scenePath);
-  const extension = path10.posix.extname(resolved.relativePath).toLowerCase();
+  const extension = path11.posix.extname(resolved.relativePath).toLowerCase();
   if (![".tscn", ".scn"].includes(extension)) {
     throw new ProjectAwarenessError("not_a_scene_file", "Scene tree parsing supports .tscn text scenes and .scn metadata only.", {
       path: resolved.relativePath
@@ -36185,8 +36302,8 @@ function normalizeSafeGlob(value) {
   if (isAnyAbsolutePath(raw) || raw.includes("\0")) {
     throw new ProjectAwarenessError("invalid_glob", "Globs must be project-relative and must not contain NUL bytes.");
   }
-  const normalized = path10.posix.normalize(raw.replaceAll("\\", "/"));
-  if (normalized === ".." || normalized.startsWith("../") || path10.posix.isAbsolute(normalized)) {
+  const normalized = path11.posix.normalize(raw.replaceAll("\\", "/"));
+  if (normalized === ".." || normalized.startsWith("../") || path11.posix.isAbsolute(normalized)) {
     throw new ProjectAwarenessError("glob_traversal_rejected", "Glob traversal outside the project is not allowed.");
   }
   const literalSegments = normalized.split("/").filter((segment) => !segment.includes("*") && !segment.includes("?"));
@@ -36774,9 +36891,9 @@ function hasDiagnosticRole(threeD) {
     threeD.camera || threeD.light || threeD.mesh || threeD.collision_shape || threeD.navigation_region
   );
 }
-function objectAt2(value, path15) {
+function objectAt2(value, path16) {
   let current = value;
-  for (const key of path15) {
+  for (const key of path16) {
     const object3 = objectOrNull2(current);
     if (!object3) {
       return null;
@@ -36785,9 +36902,9 @@ function objectAt2(value, path15) {
   }
   return objectOrNull2(current);
 }
-function boolAt(value, path15) {
+function boolAt(value, path16) {
   let current = value;
-  for (const key of path15) {
+  for (const key of path16) {
     const object3 = objectOrNull2(current);
     if (!object3) {
       return null;
@@ -36796,8 +36913,8 @@ function boolAt(value, path15) {
   }
   return typeof current === "boolean" ? current : null;
 }
-function vectorAt(value, path15) {
-  const object3 = objectAt2(value, path15);
+function vectorAt(value, path16) {
+  const object3 = objectAt2(value, path16);
   return vectorFromObject(object3);
 }
 function vectorAtObject(value, key) {
@@ -37417,7 +37534,7 @@ function boolOrNull(value) {
 
 // godot-codex-bridge/mcp_server/src/runtimeState.ts
 import fs10 from "node:fs/promises";
-import path11 from "node:path";
+import path12 from "node:path";
 var DEFAULT_MAX_AGE_MS = 5e3;
 var DEFAULT_MAX_BYTES = 512 * 1024;
 var MAX_DEPTH = 8;
@@ -37425,8 +37542,8 @@ var MAX_ARRAY_ITEMS = 120;
 var MAX_OBJECT_KEYS = 120;
 var MAX_STRING_LENGTH = 1e3;
 async function getRuntimeState(config2, args = {}) {
-  const runtimeDir = path11.join(config2.bridgeDir, "runtime");
-  const statePath = path11.join(runtimeDir, "state.json");
+  const runtimeDir = path12.join(config2.bridgeDir, "runtime");
+  const statePath = path12.join(runtimeDir, "state.json");
   if (!isInsidePath(runtimeDir, statePath) || !isInsidePath(config2.bridgeDir, statePath)) {
     return {
       status: "error",
@@ -37518,8 +37635,8 @@ async function getRuntimeState(config2, args = {}) {
   };
 }
 async function getRuntimeEvents(config2, args = {}) {
-  const runtimeDir = path11.join(config2.bridgeDir, "runtime");
-  const eventsPath = path11.join(runtimeDir, "events.json");
+  const runtimeDir = path12.join(config2.bridgeDir, "runtime");
+  const eventsPath = path12.join(runtimeDir, "events.json");
   if (!isInsidePath(runtimeDir, eventsPath) || !isInsidePath(config2.bridgeDir, eventsPath)) {
     return {
       status: "error",
@@ -37652,8 +37769,8 @@ function boundedNumber2(value, fallback, min, max) {
 }
 
 // godot-codex-bridge/mcp_server/src/timelineCapture.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
-import path12 from "node:path";
+import { randomUUID as randomUUID3 } from "node:crypto";
+import path13 from "node:path";
 var TIMELINE_CAPTURE_VERSION = "godot-codex-bridge/timeline-capture-v1";
 async function captureTimelineScreenshots(config2, bridge, options) {
   const frameCount = clampInteger(options.frameCount, 2, 12);
@@ -37693,7 +37810,7 @@ async function captureTimelineScreenshots(config2, bridge, options) {
   const succeededFrames = frames.filter((frame) => frame.status === "ok").length;
   const captureStatus = succeededFrames === frameCount ? "completed" : succeededFrames > 0 ? "partial" : "failed";
   const manifestStatus = captureStatus === "failed" ? failureStatus ?? "error" : "ok";
-  const artifactRoot = path12.join(config2.bridgeDir, "artifacts", "timeline_captures", captureId);
+  const artifactRoot = path13.join(config2.bridgeDir, "artifacts", "timeline_captures", captureId);
   ensureDirectoryInsideRootSync(config2.projectRoot, artifactRoot);
   const manifest = {
     status: manifestStatus,
@@ -37727,7 +37844,7 @@ async function captureTimelineScreenshots(config2, bridge, options) {
   if (options.baselineName || options.baselinePath) {
     manifest.baseline_comparison = disabledBaselineComparison(options.baselineName, options.baselinePath, frames.length);
   }
-  const manifestPath = path12.join(artifactRoot, "timeline.json");
+  const manifestPath = path13.join(artifactRoot, "timeline.json");
   writeFileInsideRootSync(config2.projectRoot, manifestPath, `${JSON.stringify(manifest, null, 2)}
 `);
   return {
@@ -37783,7 +37900,7 @@ function frameFromEnvelope(index, requestedAt, completedAt, latencyMs, envelope)
 }
 function makeCaptureId() {
   const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-  return `timeline_${timestamp}_${randomUUID2().slice(0, 8)}`;
+  return `timeline_${timestamp}_${randomUUID3().slice(0, 8)}`;
 }
 function sanitizeReason(value) {
   if (!value) {
@@ -38066,7 +38183,7 @@ function tokenize2(value) {
 
 // godot-codex-bridge/mcp_server/src/undoSnapshot.ts
 import fs11 from "node:fs/promises";
-import path13 from "node:path";
+import path14 from "node:path";
 var ALLOWED_EXTENSIONS = /* @__PURE__ */ new Set([".gd", ".tscn", ".tres", ".cfg", ".godot", ".json"]);
 var MAX_SNAPSHOT_FILES = 50;
 var MAX_FILE_BYTES = 2e6;
@@ -38087,13 +38204,13 @@ async function createUndoSnapshot(projectRoot, bridgeDir, options) {
     validated.push(result);
   }
   const snapshotId = snapshotIdFor2(options.label);
-  const snapshotRoot = path13.join(bridgeDir, "artifacts", "undo_snapshots", snapshotId);
-  const filesRoot = path13.join(snapshotRoot, "files");
+  const snapshotRoot = path14.join(bridgeDir, "artifacts", "undo_snapshots", snapshotId);
+  const filesRoot = path14.join(snapshotRoot, "files");
   ensureDirectoryInsideRootSync(projectRoot, filesRoot);
   const files = [];
   for (const item of validated) {
-    const destination = path13.join(filesRoot, item.relativePath);
-    ensureDirectoryInsideRootSync(projectRoot, path13.dirname(destination));
+    const destination = path14.join(filesRoot, item.relativePath);
+    ensureDirectoryInsideRootSync(projectRoot, path14.dirname(destination));
     const sourceBytes = readFileInsideRootSync(projectRoot, item.absolutePath);
     writeFileInsideRootSync(projectRoot, destination, sourceBytes);
     files.push({
@@ -38115,7 +38232,7 @@ async function createUndoSnapshot(projectRoot, bridgeDir, options) {
     files,
     restore_note: "This snapshot is local evidence only. Review files manually before restoring."
   };
-  const manifestPath = path13.join(snapshotRoot, "manifest.json");
+  const manifestPath = path14.join(snapshotRoot, "manifest.json");
   writeFileInsideRootSync(projectRoot, manifestPath, `${JSON.stringify(manifest, null, 2)}
 `);
   return {
@@ -38127,21 +38244,21 @@ async function validateSnapshotPath(projectRoot, requestedPath) {
   if (typeof requestedPath !== "string" || requestedPath.trim() === "") {
     return { error: { code: "invalid_path", message: "Snapshot path must be a non-empty string." } };
   }
-  if (path13.isAbsolute(requestedPath)) {
+  if (path14.isAbsolute(requestedPath)) {
     return { error: { code: "absolute_path_rejected", message: "Snapshot paths must be project-relative." } };
   }
   if (requestedPath.includes("..")) {
     return { error: { code: "path_traversal_rejected", message: "Snapshot paths must not contain '..'." } };
   }
-  const normalizedRelative = requestedPath.replace(/^res:\/\//, "").replace(/[\\/]+/g, path13.sep);
+  const normalizedRelative = requestedPath.replace(/^res:\/\//, "").replace(/[\\/]+/g, path14.sep);
   if (normalizedRelative.startsWith(".godot") || normalizedRelative.startsWith(".import")) {
     return { error: { code: "generated_path_rejected", message: "Generated Godot cache/import paths are not snapshot targets." } };
   }
-  const extension = path13.extname(normalizedRelative).toLowerCase();
+  const extension = path14.extname(normalizedRelative).toLowerCase();
   if (!ALLOWED_EXTENSIONS.has(extension)) {
     return { error: { code: "unsupported_snapshot_extension", message: `Unsupported snapshot extension: ${extension || "(none)"}.` } };
   }
-  const absolutePath = path13.resolve(projectRoot, normalizedRelative);
+  const absolutePath = path14.resolve(projectRoot, normalizedRelative);
   if (!isInsidePath(projectRoot, absolutePath)) {
     return { error: { code: "path_boundary_rejected", message: "Resolved snapshot path is outside the project root." } };
   }
@@ -39002,7 +39119,8 @@ function createToolHandlers(config2) {
             "stop_animation_preview",
             {
               node_path: validateNodePath(stringOrDefault2(args.nodePath, "")),
-              keep_state: args.keepState !== false
+              keep_state: args.keepState !== false,
+              keep_pose: args.keepPose === true
             },
             numberOrDefault3(args.timeoutMs, config2.addonRequestTimeoutMs)
           )
@@ -39751,10 +39869,10 @@ async function validateProjectResPath(projectRoot, resPath, options) {
   if (extensions.length > 0 && !extensions.some((extension) => lower.endsWith(extension))) {
     throw codedError(extensionCode, `${kind} path must end in one of: ${extensions.join(", ")}.`);
   }
-  const projectRootResolved = path14.resolve(projectRoot);
-  const absolutePath = path14.resolve(projectRootResolved, ...resourcePath.split("/"));
-  const relative = path14.relative(projectRootResolved, absolutePath);
-  if (relative.startsWith("..") || path14.isAbsolute(relative)) {
+  const projectRootResolved = path15.resolve(projectRoot);
+  const absolutePath = path15.resolve(projectRootResolved, ...resourcePath.split("/"));
+  const relative = path15.relative(projectRootResolved, absolutePath);
+  if (relative.startsWith("..") || path15.isAbsolute(relative)) {
     throw codedError(pathCode, `${kind} path resolved outside the Godot project root.`);
   }
   if (mustExist) {
@@ -40539,7 +40657,7 @@ function codedError(code, message, details = {}) {
 function createGodotCodexBridgeServer(config2 = createServerConfig()) {
   const server = new McpServer({
     name: "godot-codex-bridge",
-    version: "0.0.1"
+    version: "0.2.0"
   });
   registerTools(server, config2);
   return server;
@@ -41393,10 +41511,11 @@ function registerTools(server, config2) {
     "godot.stop_animation_preview",
     {
       title: "Stop Godot Animation Preview",
-      description: "Stop an AnimationPlayer preview in the live editor without saving the scene.",
+      description: "Stop an AnimationPlayer preview in the live editor without saving the scene. Restores the pose from before the preview unless keepPose is true.",
       inputSchema: {
         nodePath: external_exports.string().min(1).max(400),
         keepState: external_exports.boolean().optional(),
+        keepPose: external_exports.boolean().optional(),
         timeoutMs: external_exports.number().int().min(250).max(3e4).optional()
       }
     },
@@ -41459,7 +41578,7 @@ function registerTools(server, config2) {
     "godot.undo_last_bridge_action",
     {
       title: "Undo Last Godot Bridge Action",
-      description: "Undo the latest current-scene UndoRedo action only when it was created by Godot Codex Bridge. Does not save the scene.",
+      description: "Undo the latest Godot Codex Bridge action from this editor session (scene or global history) only when nothing newer happened in the editor; otherwise refuses with a reason. Does not save the scene.",
       inputSchema: {
         timeoutMs: external_exports.number().int().min(250).max(3e4).optional()
       }

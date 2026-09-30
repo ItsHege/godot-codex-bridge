@@ -373,7 +373,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
         clientInfo: {
           name: "godot-codex-bridge-codex-host",
           title: "Godot Codex Bridge Codex Host",
-          version: "0.0.1"
+          version: "0.2.0"
         },
         capabilities: null
       });

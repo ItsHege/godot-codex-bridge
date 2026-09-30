@@ -121,9 +121,13 @@ Backups are stored under:
 ```
 
 Then open the project in Godot 4.7.1 and enable "Godot Codex Bridge" from
-Project Settings -> Plugins. The plugin exposes a Codex Bridge main screen,
-and a left Codex Tools dock with internal Bridge and Codex Chat tabs; use
-Refresh Context and Capture Screenshot from there.
+Project Settings -> Plugins. The plugin exposes a Codex Bridge main screen and
+a Codex Tools dock next to the Inspector with Bridge and Codex Chat tabs. Use
+Refresh and Screenshot in the Bridge tab's Context section.
+
+The target project must be a separate tree from the Bridge checkout. The
+trusted Host launcher refuses projects inside its own installation, so copy
+the bundled fixture elsewhere before using in-editor chat with it.
 
 ## MCP Server Setup
 
@@ -208,70 +212,84 @@ auth. It runs a bounded read-only `scene_agent` background review against the
 fixture and writes
 `.godot\godot_codex_bridge\artifacts\real_app_server_background_validation.json`.
 
-## Codex Chat Troubleshooting
+## In-Editor Codex Chat
 
-After installing the addon through `scripts\install_addon.ps1 -Apply`, inspect
-and explicitly start Codex Host from the trusted installation. The installation
-must be a separate tree from the target project:
+One-click Connect is Windows-only and uses PowerShell 7. Build the Host first
+(`npm install` and `npm run build` from the repository root), then trust the
+installation once from the repository root:
 
 ```powershell
+pwsh godot-codex-bridge\scripts\start_codex_host.ps1 -Trust
+```
+
+`-Trust` validates the built Host, resolves Node from PATH and the npm-installed
+Codex executable (override with `-NodeExecutable` or `-CodexExecutable`),
+computes the installation fingerprint and writes a per-user record:
+
+```text
+%LOCALAPPDATA%\GodotCodexBridge\trusted_host.json
+```
+
+Running `-Trust` is your approval. The record lives outside every Godot
+project; project content, including `host_config.json`, never chooses what the
+addon launches.
+
+Press `Connect` in the Godot `Codex Chat` tab. If a paired Host is already
+reachable, the addon reuses it. Otherwise it generates a one-launch pairing
+secret, starts the trusted PowerShell launcher hidden for this project, waits
+for the launch status under `%LOCALAPPDATA%\GodotCodexBridge\launch`, and pairs
+automatically. The launcher starts nothing if its script, executables or
+fingerprint differ from the record. Closing the editor stops this owned Host,
+except while an addon update is pending.
+
+After a rebuild or update the fingerprint changes. Connect then shows the
+install path with the old and new fingerprints and asks whether to trust the
+new version. Without a trust record, Connect shows the one-time `-Trust`
+command. The full contract is `contracts\ONE_CLICK_CONNECT_V1.md`.
+
+Connect binds the Codex Bridge tools to the attached project at Host launch.
+If the tools are unavailable, press `Enable Tools` (or `Refresh Tools`). The
+host writes rollback evidence under
+`.godot\godot_codex_bridge\codex_host\bridge_tools`. The registration is
+project-bound through `GODOT_CODEX_BRIDGE_PROJECT_ROOT` and
+`GODOT_CODEX_BRIDGE_DIR`.
+
+### Manual Host start
+
+The interactive launcher still works without a trust record, for example to
+inspect exactly what would run:
+
+```powershell
+cd godot-codex-bridge
 npm run start:codex-host -- -Inspect -ProjectRoot "<your Godot project>" -Runtime app-server -CodexExecutable "<absolute codex.exe>"
 npm run start:codex-host -- -Start -ProjectRoot "<your Godot project>" -Runtime app-server -CodexExecutable "<absolute codex.exe>"
 ```
 
 Review the displayed installation, executable and entrypoint paths, runtime,
-ports, and fingerprint. In the second command type the exact requested `START`
+ports and fingerprint. In the second command type the exact requested `START`
 line. A changed build or configuration needs a fresh decision. `STOP` stops
-only the Host owned by that launcher; an occupied port is never killed.
-The prompt verifies operator intent in a terminal, not the OS identity of a
-human; native same-user code could script it. Do not run untrusted executable
-project scripts during this restricted workflow. The launcher checks its owned
-Host through a health proof without returning the nonce to callers. After
-`HOST_READY`, copy the 64-character pairing secret shown in the trusted
-launcher terminal. Press `Connect` in the Godot `Codex Chat` dock and paste it
-into the pairing dialog. The addon holds the secret only for this connection
-and asks again after disconnect. The addon reads
-`addons\godot_codex_bridge\host_config.json` for loopback connection metadata,
-then pairs with the running Host before attaching the current project.
+only the Host owned by that launcher; an occupied port is never killed. The
+prompt verifies operator intent in a terminal, not the OS identity of a
+human; native same-user code could script it. After `HOST_READY`, copy the
+64-character pairing secret shown in the launcher terminal, press `Connect` in
+the dock and paste it into the pairing dialog. The addon holds the secret only
+for this connection and asks again after disconnect. The addon does not own or
+stop a manually started Host; it only disconnects from it.
 
-If the chat shows `Tools: missing`, press `Enable Tools`. This registers the
-local `godot_codex_bridge` MCP server in Codex app-server config, reloads MCP
-servers, and verifies that `godot.*` tools are visible. The host writes rollback
-evidence under `.godot\godot_codex_bridge\codex_host\bridge_tools`. The
-registration is project-bound through `GODOT_CODEX_BRIDGE_PROJECT_ROOT` and
-`GODOT_CODEX_BRIDGE_DIR`.
+### Chat troubleshooting
 
 If the Godot dock shows `Host: disconnected` after pressing `Connect`, first
 check that `addons\godot_codex_bridge\host_config.json` exists in the active
-Godot project. If it is missing, reinstall the addon through the SSOT helper
-instead of copying an old addon folder by hand:
+Godot project. It holds loopback connection metadata. If it is missing or
+invalid, Connect reports an install/configuration error instead of using a
+default port. Reinstall the addon through the SSOT helper instead of copying an
+old addon folder by hand. The same fix applies when the chat input is not
+visible:
 
 ```powershell
 cd godot-codex-bridge
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_addon.ps1 -ProjectRoot "<your Godot project>" -Apply -Replace
 ```
-
-The addon does not execute project-local launcher paths. When the Host is
-missing, Connect reports the manual-start requirement without spawning Node or
-PowerShell from `host_config.json`. If connection metadata is missing or invalid,
-Connect reports an install/configuration error instead of using a default port.
-
-Host lifecycle: start Host from the trusted installation. Its normal shutdown
-closes WebSocket clients, stops background tasks, and shuts down the Codex
-app-server child process; the addon does not own or kill manually started Host
-processes.
-- If you started Codex Host manually in a terminal for development, the addon
-  only disconnects from it; it does not treat that manual process as owned.
-
-If the chat input is not visible, refresh the addon through the SSOT helper:
-
-```powershell
-cd godot-codex-bridge
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_addon.ps1 -ProjectRoot "<your Godot project>" -Apply -Replace
-```
-
-The current dock layout keeps the input row above the chat log and validates it
-with `npm run validate:visible-chat-editor`.
 
 If a target project still behaves like an older addon after install, verify all
 three of these before debugging code:
@@ -282,6 +300,32 @@ three of these before debugging code:
    from the current checkout after `npm run package:addon`.
 3. Godot was restarted or the plugin was disabled/enabled in Project Settings ->
    Plugins so the editor reloads the copied scripts.
+
+## Keeping Projects Up to Date
+
+The Bridge tab can check for and install a newer reviewed addon build
+(Windows, PowerShell 7). Builds always come from the trusted Host's own
+checkout, never from the project or the request. To make a project updatable,
+install it once through the update script while Godot is closed:
+
+```powershell
+pwsh godot-codex-bridge\scripts\gc_work.ps1 -Action Publish
+pwsh godot-codex-bridge\scripts\gc_work.ps1 -Action Update -ProjectRoot "<your Godot project>"
+```
+
+`Publish` requires a committed, unmodified addon tree and records its build id
+in `godot-codex-bridge\GC_WORK_CHANNEL.json`. `Update` installs that build with
+a backup, refuses to remove files or run while the editor is active, and adds
+the project to `%LOCALAPPDATA%\GodotCodexBridge\gc-work-projects.json`.
+`-Action Status` reports the state of registered projects.
+
+After pulling and rebuilding a newer version, run `-Action Publish` again. In
+the Bridge tab, `Check` asks the paired Host and `Update` appears when a newer
+build is available. Confirming closes Godot through its normal close request
+(Godot still asks about unsaved changes), installs after the editor exits,
+writes `.godot\godot_codex_bridge\addon_update_result.json` and reopens the
+project. The dock shows the result once on the next start. The full contract is
+`contracts\ADDON_UPDATE_V1.md`.
 
 ## Validation Commands
 
@@ -409,11 +453,11 @@ fixture, `npm run validate:visible-editor` covers the live heartbeat, fallback
 request polling and screenshot capture evidence.
 
 1. The plugin appears in Project Settings -> Plugins as "Godot Codex Bridge".
-2. Enabling it shows the Codex Bridge main screen and the left Codex Tools
-   dock.
-3. Refresh Context writes `.godot\godot_codex_bridge\context_snapshot.json`.
+2. Enabling it shows the Codex Bridge main screen and the Codex Tools dock
+   next to the Inspector.
+3. Refresh (Bridge tab, Context section) writes `.godot\godot_codex_bridge\context_snapshot.json`.
 4. `tests\validate_context_snapshot.ps1` passes for that project root.
-5. Capture Screenshot creates a PNG under
+5. Screenshot creates a PNG under
    `.godot\godot_codex_bridge\artifacts\screenshots` or returns a structured
    failure without Godot null-parameter errors.
 6. `godot.bridge_status` reports a discovered Host URL when the local addon

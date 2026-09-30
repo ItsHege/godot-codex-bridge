@@ -55,7 +55,8 @@ The MCP tool schemas (`godot.*`) form the public interface with AI coding agents
 ### 2. Maintain Safety & Permission Boundaries
 - **Read-First Philosophy**: Keep tools read-only by default.
 - **UndoRedo Guarantee**: Any mutating editor action must execute through Godot's native `UndoRedo` stack.
-- **Path Guard**: Never bypass `isInsidePath` checks or access files outside the targeted Godot project root.
+- **Path Guard**: Never bypass `isInsidePath` checks or access files outside the targeted Godot project root. New file access must keep the link, junction, hard-link and secret-file rejections.
+- **Trust boundary**: Project files, including `host_config.json`, must never decide what the editor launches. One-click Connect launches only what the per-user trust record names.
 - **Local transport**: Keep the Godot/MCP/Host bridge on loopback. Codex itself
   uses the user's configured model provider; do not add telemetry or new
   external destinations. Browser clients and remote Host binds are unsupported.

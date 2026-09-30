@@ -131,8 +131,8 @@ the exact output path, use
 
 3. After reviewing the dry-run output, copy the addon into the target Godot
    project with `-Apply`, then enable "Godot Codex Bridge" in Project Settings
-   -> Plugins. The plugin appears as a Codex Bridge main screen and a left
-   Codex Tools dock with internal Bridge and Codex Chat tabs.
+   -> Plugins. The plugin appears as a Codex Bridge main screen and a Codex
+   Tools dock next to the Inspector with Bridge and Codex Chat tabs.
 
 4. Start the MCP server from `mcp_server`:
 
@@ -213,29 +213,40 @@ restricted build until their removed-route expectations are replaced.
 Each JSON report includes `fixture_restore` evidence for the fixture
 `host_config.json`.
 
-10. For the in-editor Codex chat prototype, install and validate the local host:
+10. For the in-editor Codex chat, build and check the local Host:
 
 ```powershell
 npm run host:install
-npm run host:schemas
+npm run host:build
 npm run host:test
 npm run host:doctor
 ```
 
-Install the addon through the helper, start Codex Host from the trusted
-installation, then open the project and use the contextual `Connect`, `Refresh`,
-or `Reconnect` action beside the `Codex Chat` status. `Advanced` keeps model,
-reasoning, trust, team, attachment, and tool controls out of the primary path.
-The helper generates `addons\godot_codex_bridge\host_config.json` for loopback
-connection and compatibility metadata. That project-local file is not
-executable authority: the addon does not launch its `node_entry` or
-`start_script`. Start Codex Host from the trusted installation, then use the
-dock's Connect action. Closing Godot never stops a manually started Host. The
-trusted launcher displays a one-launch pairing secret; paste it into the dock
-after pressing Connect. The addon asks again after disconnect.
+`npm run host:schemas` regenerates the app-server schema lock; run it only
+when deliberately moving the supported Codex CLI baseline, with the same
+binary the Host launches.
 
-For an installed project outside the product tree, inspect the trusted
-installation and supported launch configuration, then start it explicitly:
+On Windows with PowerShell 7, trust the Host installation once, then press
+`Connect` beside the `Codex Chat` status:
+
+```powershell
+pwsh scripts\start_codex_host.ps1 -Trust
+```
+
+`-Trust` writes a per-user record under `%LOCALAPPDATA%\GodotCodexBridge`.
+Connect launches only what that record names, pairs automatically and stops
+its owned Host when Godot closes. A rebuilt Host has a new fingerprint, so
+Connect asks to trust it again. See `contracts\ONE_CLICK_CONNECT_V1.md`.
+`Advanced` keeps model, reasoning, trust, team, attachment and tool controls
+out of the primary path.
+
+The install helper generates `addons\godot_codex_bridge\host_config.json` for
+loopback connection and compatibility metadata. That project-local file is not
+executable authority: the addon never launches its `node_entry` or
+`start_script`.
+
+Without a trust record, or to inspect exactly what would run, start the Host
+explicitly for an installed project outside the product tree:
 
 ```powershell
 npm run start:codex-host -- -Inspect -ProjectRoot "<installed Godot project>" -Runtime app-server -CodexExecutable "<absolute codex.exe>"
@@ -243,8 +254,10 @@ npm run start:codex-host -- -Start -ProjectRoot "<installed Godot project>" -Run
 ```
 
 Review the displayed paths and fingerprint; type the exact requested `START`
-line in the second command. Keep that terminal open and type `STOP` to shut down
-its owned Host. `-Runtime mock` is for isolated fixture validation, not an
+line in the second command, then paste the one-launch pairing code it prints
+into the dock after pressing Connect. Keep that terminal open and type `STOP`
+to shut down its owned Host; closing Godot never stops a manually started
+Host. `-Runtime mock` is for isolated fixture validation, not an
 authenticated Codex turn. The addon connects to the configured loopback port;
 its project-local config cannot launch or trust a Host. The bundled example
 project is inside the product tree, so use the isolated fixture driver or a
