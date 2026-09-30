@@ -1,6 +1,6 @@
 {
   "name": "godot-codex-bridge-repo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Root developer workspace for Godot Codex Bridge (MCP Server and Codex Host).",
   "workspaces": [

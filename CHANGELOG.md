@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-30
+
 ### Editor experience
 
 - **One-click Connect.** After a one-time `start_codex_host.ps1 -Trust`, the
@@ -25,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marker list with delete, and keyboard shortcuts.
 - **Remembered model.** The chat keeps your last model and reasoning effort
   instead of falling back to the default model on every start.
+- **Local Codex plugin refreshed.** The plugin's bundled MCP server is rebuilt
+  from the 0.2.0 source, including the security fixes below.
 - **Project-bound Bridge tools.** Codex's Bridge tools always target the open
   project, even when a global Codex config points them elsewhere.
 
@@ -178,3 +182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - GitHub Actions CI workflow covering Node 20.x and 22.x test execution on Ubuntu.
   - Standard community templates for bug reports, feature requests, and pull requests.
   - Security policy (`SECURITY.md`) and contribution guide (`CONTRIBUTING.md`).
+
+[Unreleased]: https://github.com/ItsHege/godot-codex-bridge/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ItsHege/godot-codex-bridge/releases/tag/v0.2.0
+[0.1.0]: https://github.com/ItsHege/godot-codex-bridge/releases/tag/v0.1.0

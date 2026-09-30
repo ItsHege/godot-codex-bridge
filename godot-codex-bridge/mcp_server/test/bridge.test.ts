@@ -69,8 +69,7 @@ test("BridgeClient returns addon response when present", async () => {
 
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
-  await fs.writeFile(
-    path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
+  await publishResponse(config.bridgeDir, request.request_id,
     JSON.stringify({ request_id: request.request_id, status: "ok", data: { screenshot_path: "local.png" } }),
     "utf8",
   );
@@ -167,8 +166,7 @@ test("BridgeClient reports host RPC failure before file polling fallback", async
     const pending = bridge.sendAddonRequest("refresh_context", {}, 1_000);
     const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
     const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
-    await fs.writeFile(
-      path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
+    await publishResponse(config.bridgeDir, request.request_id,
       JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { transport_marker: "file_fallback" } }),
       "utf8",
     );
@@ -203,8 +201,7 @@ test("BridgeClient falls back to file polling when the Host is not running", asy
   const pending = new BridgeClient(config).sendAddonRequest("refresh_context", {}, 1_000);
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
-  await fs.writeFile(
-    path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
+  await publishResponse(config.bridgeDir, request.request_id,
     JSON.stringify({ request_id: request.request_id, status: "succeeded", data: {} }),
     "utf8",
   );
@@ -263,7 +260,7 @@ test("BridgeClient refuses a truncated or mismatched final response", async () =
     const pending = new BridgeClient(config).sendAddonRequest("refresh_context", {}, 1_000);
     const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
     const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
-    await fs.writeFile(path.join(config.bridgeDir, "responses", `${request.request_id}.json`), body, "utf8");
+    await publishResponse(config.bridgeDir, request.request_id, body, "utf8");
     const result = await pending;
     assert.equal(result.status, "error");
     assert.equal((result.error as { code?: string })?.code, "invalid_addon_response");
@@ -281,8 +278,7 @@ test("BridgeClient treats contract succeeded addon response as ok", async () => 
 
   const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
-  await fs.writeFile(
-    path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
+  await publishResponse(config.bridgeDir, request.request_id,
     JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { context_snapshot_path: "context_snapshot.json" } }),
     "utf8",
   );
@@ -362,4 +358,13 @@ function listen(server: Server): Promise<void> {
 
 function close(server: Server): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
+}
+
+// Publish atomically like the addon (FILE_TRANSPORT_V2) so the polling client
+// never reads a half-written response on a slow runner.
+async function publishResponse(bridgeDir: string, requestId: string, body: string, _encoding?: string): Promise<void> {
+  const target = path.join(bridgeDir, "responses", `${requestId}.json`);
+  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(temporary, body, "utf8");
+  await fs.rename(temporary, target);
 }

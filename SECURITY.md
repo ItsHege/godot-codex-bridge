@@ -27,9 +27,11 @@ Godot Codex Bridge operates with significant capabilities within a developer's l
 - **File System Access:** Reads scene files, scripts, logs, and writes project artifacts inside `.godot/godot_codex_bridge/`.
 
 Because of these capabilities, the following areas are strictly **security-relevant**:
-1. **Path Boundary Confinement:** All file read and write operations must strictly stay confined within the configured Godot project root. Any path traversal (`../`), symlink bypass, or access to sensitive parent directories is treated as a critical security vulnerability.
-2. **Approval-Gated Mutation:** Mutating tools that write to disk or apply patches (`godot.apply_approved_diff`, `godot.save_scene`) require explicit approval tokens and confirmation gates. Bypassing these gates is a vulnerability.
-3. **Local-Only Scope:** Visual evidence, screenshots, and logs remain on the local machine within `.godot/godot_codex_bridge/`. No telemetry, unapproved external HTTP requests, or remote uploads are permitted.
-4. **UndoRedo Guarantee:** Live editor operations must register native Godot `UndoRedo` actions so user actions cannot permanently corrupt editor state without a rollback path.
+1. **Path Boundary Confinement:** All file read and write operations must stay inside the configured Godot project root. Path traversal (`../`), absolute paths, symbolic links, junctions and hard-linked files are rejected; any bypass is a critical vulnerability.
+2. **Secret Files:** Project reading tools never return common secret-bearing files (`.env*`, private keys, keystores, credentials and similar). Exposing one to an agent is a vulnerability.
+3. **Host Pairing and Trust:** The Codex Host binds to loopback only and pairs with the addon through a per-launch secret and mutual proofs; unpaired sockets cannot call privileged methods. One-click Connect launches only what the per-user trust record at `%LOCALAPPDATA%\GodotCodexBridge\trusted_host.json` names, and refuses a changed installation until the user trusts it again. Project files must never be able to choose what the editor launches.
+4. **Approval-Gated Mutation:** Command, file-change and tool approvals are bound to the active Codex thread and turn. Only read-only Bridge tools may be allowed for a session; project changes, screenshots and runtime input always ask. Scene-save tools and direct diff application (`godot.save_scene`, `godot.apply_approved_diff`) fail closed until trusted, single-use approval receipts exist. Bypassing any of these gates is a vulnerability.
+5. **Local-Only Scope:** Visual evidence, screenshots and logs remain on the local machine within `.godot/godot_codex_bridge/`. No telemetry, unapproved external HTTP requests or remote uploads are permitted.
+6. **UndoRedo Guarantee:** Live editor operations must register native Godot `UndoRedo` actions so agent changes always have a rollback path.
 
 For full architectural details on our security and containment design, see [SAFETY.md](godot-codex-bridge/docs/SAFETY.md).

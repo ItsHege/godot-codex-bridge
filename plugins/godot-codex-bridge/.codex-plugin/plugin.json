@@ -1,6 +1,6 @@
 {
   "name": "godot-codex-bridge",
-  "version": "0.1.0+codex.20260929160810",
+  "version": "0.2.0",
   "description": "Set up bounded Godot project context and guided editor integration for Codex.",
   "author": {
     "name": "Godot Codex Bridge contributors"
