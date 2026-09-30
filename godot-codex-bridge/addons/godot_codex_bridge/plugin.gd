@@ -8,6 +8,14 @@ const ChatActionModel := preload("core/chat_action_model.gd")
 const ChatApprovalModel := preload("core/chat_approval_model.gd")
 const ChatControlStateModel := preload("core/chat_control_state_model.gd")
 const ChatHostConfigModel := preload("core/chat_host_config_model.gd")
+const TrustedHostLaunchModel := preload("core/trusted_host_launch_model.gd")
+const DockStyle := preload("core/dock_style.gd")
+const ChatApprovalReviewModel := preload("core/chat_approval_review_model.gd")
+const ChatApprovalPopup := preload("core/chat_approval_popup.gd")
+const ChatSessionAllowModel := preload("core/chat_session_allow_model.gd")
+const ChatModelPreferenceModel := preload("core/chat_model_preference_model.gd")
+const BridgeRequestLimits := preload("core/bridge_request_limits.gd")
+const BridgePathGuard := preload("core/bridge_path_guard.gd")
 const ChatHostStateModel := preload("core/chat_host_state_model.gd")
 const ChatInputModel := preload("core/chat_input_model.gd")
 const ChatLayoutStatusModel := preload("core/chat_layout_status_model.gd")
@@ -24,6 +32,10 @@ const ChatScrollPolicyModel := preload("core/chat_scroll_policy_model.gd")
 const ChatThemeModel := preload("core/chat_theme_model.gd")
 const ChatPanelView := preload("core/chat_panel_view.gd")
 const GcWorkChannelModel := preload("core/gc_work_channel_model.gd")
+const AddonUpdateModel := preload("core/addon_update_model.gd")
+const AddonUpdatePanel := preload("core/addon_update_panel.gd")
+const BridgeDockStatusModel := preload("core/bridge_dock_status_model.gd")
+const PermissionProfileModel := preload("core/permission_profile_model.gd")
 const ChatSessionModel := preload("core/chat_session_model.gd")
 const ChatStatusModel := preload("core/chat_status_model.gd")
 const ChatTeamModel := preload("core/chat_team_model.gd")
@@ -38,6 +50,8 @@ const AnnotationCanvas := preload("core/annotation_canvas.gd")
 const AnnotationArtifactModel := preload("core/annotation_artifact_model.gd")
 const AnnotationController := preload("core/annotation_controller.gd")
 const EditorControl := preload("core/editor_control.gd")
+const EditorUndo := preload("core/editor_undo.gd")
+const SpatialBoundsModel := preload("core/spatial_bounds_model.gd")
 const EditorDiagnostics := preload("core/editor_diagnostics.gd")
 const EditorNodeLifecycle := preload("core/editor_node_lifecycle.gd")
 const EditorSceneMutation := preload("core/editor_scene_mutation.gd")
@@ -52,9 +66,12 @@ const EditorScriptNavigation := preload("core/editor_script_navigation.gd")
 const EditorAssetImport := preload("core/editor_asset_import.gd")
 const EditorRenderingEffects := preload("core/editor_rendering_effects.gd")
 const EditorPanelNavigation := preload("core/editor_panel_navigation.gd")
+const EditorViewportNavigation := preload("core/editor_viewport_navigation.gd")
+const EditorInspectorContext := preload("core/editor_inspector_context.gd")
 const MultiViewCaptureModel := preload("core/multi_view_capture_model.gd")
 const BridgeContext := preload("core/bridge_context.gd")
 const BridgeRequestModel := preload("core/bridge_request_model.gd")
+const BridgeRequestJournal := preload("core/bridge_request_journal.gd")
 const BridgeResponseModel := preload("core/bridge_response_model.gd")
 const BridgeUtils := preload("core/bridge_utils.gd")
 const SceneIntrospection := preload("core/scene_introspection.gd")
@@ -79,7 +96,6 @@ const PERMISSIONS_PATH := BridgeLimits.PERMISSIONS_PATH
 const SEND_CONTEXT_PATH := BridgeLimits.SEND_CONTEXT_PATH
 const NOTES_PATH := BridgeLimits.NOTES_PATH
 const HOST_CONFIG_PATH := BridgeLimits.HOST_CONFIG_PATH
-const FIX_SELECTED_NODE_APPROVAL_TOKEN := BridgeLimits.FIX_SELECTED_NODE_APPROVAL_TOKEN
 const DEFAULT_CODEX_HOST_PORT := BridgeLimits.DEFAULT_CODEX_HOST_PORT
 const CODEX_HOST_URL := BridgeLimits.CODEX_HOST_URL
 
@@ -117,6 +133,10 @@ const MAX_SCRIPT_SYMBOLS_PER_FILE := BridgeLimits.MAX_SCRIPT_SYMBOLS_PER_FILE
 const MAX_SCREENSHOTS_IN_CONTEXT := BridgeLimits.MAX_SCREENSHOTS_IN_CONTEXT
 const MAX_BRIDGE_LOG_EVENTS := BridgeLimits.MAX_BRIDGE_LOG_EVENTS
 const MAX_REQUESTS_PER_POLL := BridgeLimits.MAX_REQUESTS_PER_POLL
+const MAX_REQUEST_QUEUE_FILES := BridgeLimits.MAX_REQUEST_QUEUE_FILES
+const MAX_REQUEST_BYTES := BridgeLimits.MAX_REQUEST_BYTES
+const MAX_REQUEST_JSON_DEPTH := BridgeLimits.MAX_REQUEST_JSON_DEPTH
+const MAX_REQUEST_JSON_NODES := BridgeLimits.MAX_REQUEST_JSON_NODES
 const MAX_MATERIALS_PER_MESH := BridgeLimits.MAX_MATERIALS_PER_MESH
 const MAX_PERFORMANCE_SAMPLES := BridgeLimits.MAX_PERFORMANCE_SAMPLES
 const MAX_STRING_LENGTH := BridgeLimits.MAX_STRING_LENGTH
@@ -163,6 +183,13 @@ var _chat_input: TextEdit
 var _chat_eye_button: Button
 var _chat_composer_toggle_button: Button
 var _chat_connect_button: Button
+var _host_pair_dialog: ConfirmationDialog
+var _host_pair_input: LineEdit
+var _host_pair_secret := ""
+var _host_pairing_sent := false
+var _host_paired := false
+var _host_pair_client_nonce := ""
+var _host_pair_server_nonce := ""
 var _chat_enable_tools_button: Button
 var _chat_send_button: Button
 var _chat_cancel_button: Button
@@ -186,17 +213,30 @@ var _chat_approval_body: TextEdit
 var _chat_approval_note: LineEdit
 var _chat_approve_button: Button
 var _chat_approve_session_button: Button
+var _chat_allow_session_button: Button
+## Last explicitly chosen model/effort, stored in per-user editor settings.
+var _model_preference := ChatModelPreferenceModel.new({})
+var _model_preference_notices := {}
+var _chat_effective_default_model := ""
+var _chat_model_badge: Button
+## Read-only Godot tools the Host remembers for this session (host.status).
+var _chat_session_allowed_tools: Array[String] = []
+var _session_allow_row: HBoxContainer
+var _session_allow_label: Label
+var _auto_approved_state := {}
+var _auto_approved_body: RichTextLabel
 var _chat_reject_button: Button
 var _chat_revise_button: Button
 var _status_labels: Array[Label] = []
 var _snapshot_labels: Array[Label] = []
 var _pending_labels: Array[Label] = []
-var _poll_timer: Timer
 ## Shared context handed to extracted core/ service modules (see bridge_context.gd).
 var _context: BridgeContext
 var _introspection: SceneIntrospection
 var _annotation_controller: AnnotationController
 var _editor_control: EditorControl
+var _editor_undo: EditorUndo
+var _spatial_bounds: SpatialBoundsModel
 var _editor_diagnostics: EditorDiagnostics
 var _editor_node_lifecycle: EditorNodeLifecycle
 var _editor_scene_mutation: EditorSceneMutation
@@ -210,13 +250,20 @@ var _editor_script_navigation: EditorScriptNavigation
 var _editor_asset_import: EditorAssetImport
 var _editor_rendering_effects: EditorRenderingEffects
 var _editor_panel_navigation: EditorPanelNavigation
+var _editor_viewport_navigation: EditorViewportNavigation
+var _editor_inspector_context: EditorInspectorContext
+## True only while a play session started by run_current_scene is running;
+## emergency_stop never stops a play session the user started.
+var _bridge_owned_play_session := false
 var _multi_view_capture: MultiViewCaptureModel
 var _async_editor_requests_in_flight := {}
+var _request_journal: BridgeRequestJournal
 var _chat_transcript_view: ChatTranscriptView
 
 var _bridge_dir_abs := ""
 var _requests_dir_abs := ""
 var _responses_dir_abs := ""
+var _journal_dir_abs := ""
 var _screenshots_dir_abs := ""
 var _annotations_dir_abs := ""
 var _context_snapshot_abs := ""
@@ -237,6 +284,15 @@ var _performance_history: Array = []
 var _poll_elapsed := 0.0
 var _host_config: Dictionary = {}
 var _gc_work_status: Dictionary = {}
+var _addon_update := AddonUpdateModel.new()
+var _addon_update_panel: AddonUpdatePanel
+var _dock_status_dot: ColorRect
+var _dock_status_label: Label
+var _permission_profile_option: OptionButton
+var _permission_full_trust_dialog: ConfirmationDialog
+var _permission_checkboxes := {}
+## Advanced permissions fold state; kept for this editor session.
+var _advanced_permissions_expanded := false
 var _gc_work_refresh_elapsed := 0.0
 var _host_config_status := "missing"
 var _host_config_message := ""
@@ -250,6 +306,26 @@ var _host_start_deadline_msec := 0
 var _host_start_retry_elapsed := 0.0
 var _host_launch_attempted := false
 var _host_connect_autostart_allowed := false
+## One-click Connect session (contracts/ONE_CLICK_CONNECT_V1.md). The secret is
+## generated here, handed to the launcher only through its environment, and
+## kept in memory to pair (and re-pair) with the Host this editor launched.
+var _one_click_record: Dictionary = {}
+var _one_click_secret := ""
+var _one_click_url := ""
+var _one_click_launcher_pid := -1
+var _one_click_host_pid := -1
+var _one_click_launched_unix := 0.0
+var _one_click_deadline_msec := 0
+var _one_click_waiting := false
+var _one_click_owned := false
+var _retrust_dialog: ConfirmationDialog
+## Theme-derived dock style (colors, icons, code font); fallback when headless.
+var _dock_style: Dictionary = DockStyle.resolve(null)
+var _approval_popup: ChatApprovalPopup
+var _approval_review_button: Button
+## Approval ids whose review popup already opened by itself (once per id).
+var _approval_popup_opened_ids := {}
+var _retrust_fingerprint := ""
 var _chat_connection_state := "disconnected"
 var _chat_runtime_state := "disconnected"
 var _chat_mcp_tools_available := false
@@ -331,6 +407,8 @@ func _enter_tree() -> void:
 	_bridge_dir_abs = ProjectSettings.globalize_path(BRIDGE_DIR)
 	_requests_dir_abs = ProjectSettings.globalize_path(REQUESTS_DIR)
 	_responses_dir_abs = ProjectSettings.globalize_path(RESPONSES_DIR)
+	_journal_dir_abs = _bridge_dir_abs.path_join("request_journal")
+	_request_journal = BridgeRequestJournal.new(_journal_dir_abs, Callable(self, "_validate_bridge_path"))
 	_screenshots_dir_abs = ProjectSettings.globalize_path(SCREENSHOTS_DIR)
 	_annotations_dir_abs = ProjectSettings.globalize_path(ANNOTATIONS_DIR)
 	_context_snapshot_abs = ProjectSettings.globalize_path(CONTEXT_SNAPSHOT_PATH)
@@ -341,6 +419,8 @@ func _enter_tree() -> void:
 	_notes_abs = ProjectSettings.globalize_path(NOTES_PATH)
 	_host_config_abs = ProjectSettings.globalize_path(HOST_CONFIG_PATH)
 	_host_config = _load_host_config()
+	_addon_update.project_root = ProjectSettings.globalize_path("res://")
+	_model_preference = ChatModelPreferenceModel.new(EditorInterface.get_editor_settings())
 	_refresh_gc_work_status()
 
 	_context = BridgeContext.new()
@@ -358,6 +438,8 @@ func _enter_tree() -> void:
 	_context.log_event = Callable(self, "_log_event")
 	_context.record_editor_action = Callable(self, "_record_editor_action")
 	_context.ensure_bridge_dirs = Callable(self, "_ensure_bridge_dirs")
+	_context.ensure_safe_directory = Callable(self, "_ensure_safe_bridge_directory")
+	_context.validate_safe_path = Callable(self, "_validate_bridge_path")
 	_context.append_chat_system = Callable(self, "_append_chat_system")
 	_context.write_json_file = Callable(self, "_write_json_file")
 	_context.current_scene_path = Callable(self, "_current_scene_path_or_null")
@@ -370,6 +452,8 @@ func _enter_tree() -> void:
 	_introspection = SceneIntrospection.new(_context)
 	_annotation_controller = AnnotationController.new(_context)
 	_editor_diagnostics = EditorDiagnostics.new(_context, _notes_abs)
+	_editor_undo = EditorUndo.new(_context)
+	_spatial_bounds = SpatialBoundsModel.new(_context)
 	_editor_node_lifecycle = EditorNodeLifecycle.new(_context)
 	_editor_scene_mutation = EditorSceneMutation.new(_context)
 	_editor_scene_save = EditorSceneSave.new(_context)
@@ -382,6 +466,8 @@ func _enter_tree() -> void:
 	_editor_asset_import = EditorAssetImport.new(_context)
 	_editor_rendering_effects = EditorRenderingEffects.new(_context)
 	_editor_panel_navigation = EditorPanelNavigation.new(_context)
+	_editor_viewport_navigation = EditorViewportNavigation.new(_context)
+	_editor_inspector_context = EditorInspectorContext.new(_context)
 	_multi_view_capture = MultiViewCaptureModel.new(_context)
 	_editor_control = EditorControl.new(
 		_context,
@@ -389,6 +475,7 @@ func _enter_tree() -> void:
 		MAX_EDITOR_BATCH_ACTIONS,
 		CONTEXT_SNAPSHOT_PATH
 	)
+	_editor_control.undo_tracker = _editor_undo
 	_register_editor_control_handlers()
 
 	_ensure_bridge_dirs()
@@ -397,14 +484,9 @@ func _enter_tree() -> void:
 	_write_bridge_state(true)
 	_write_heartbeat()
 	_build_dock()
+	_show_addon_update_result()
 	_log_event("plugin_entered_tree", {"godot_version": Engine.get_version_info()})
 
-	_poll_timer = Timer.new()
-	_poll_timer.name = "GodotCodexBridgePollTimer"
-	_poll_timer.wait_time = POLL_SECONDS
-	_poll_timer.timeout.connect(_poll_requests)
-	add_child(_poll_timer)
-	_poll_timer.start()
 	set_process(true)
 
 	call_deferred("_refresh_context_from_startup")
@@ -414,12 +496,19 @@ func _exit_tree() -> void:
 	_log_event("plugin_exiting_tree")
 	_write_bridge_state(false)
 	set_process(false)
-	_disconnect_chat_host(true, "plugin_exit")
-
-	if _poll_timer != null:
-		_poll_timer.stop()
-		_poll_timer.queue_free()
-		_poll_timer = null
+	# Never stop an addon-started Host that will install a scheduled update.
+	_request_one_click_host_shutdown("plugin_exit")
+	_disconnect_chat_host(_addon_update.stop_owned_host_on_exit(), "plugin_exit")
+	_host_pair_secret = ""
+	if _host_pair_dialog != null:
+		_host_pair_dialog.queue_free()
+		_host_pair_dialog = null
+	if _approval_popup != null:
+		_approval_popup.queue_free()
+		_approval_popup = null
+	if _retrust_dialog != null:
+		_retrust_dialog.queue_free()
+		_retrust_dialog = null
 
 	if _chat_dock != null:
 		if _chat_dock.get_parent() != _dock:
@@ -439,6 +528,7 @@ func _exit_tree() -> void:
 	_status_labels.clear()
 	_snapshot_labels.clear()
 	_pending_labels.clear()
+	_permission_checkboxes.clear()
 
 
 func _process(delta: float) -> void:
@@ -455,13 +545,19 @@ func _process(delta: float) -> void:
 	_poll_elapsed += delta
 	if _poll_elapsed >= POLL_SECONDS:
 		_poll_elapsed = 0.0
+		_poll_one_click_launch()
+		if _bridge_owned_play_session and not EditorInterface.is_playing_scene():
+			_bridge_owned_play_session = false
 		_record_performance_sample()
 		_poll_requests()
 
 
 func _build_dock() -> void:
+	_dock_style = DockStyle.resolve(EditorInterface.get_base_control())
 	var dock_tabs := TabContainer.new()
 	dock_tabs.custom_minimum_size = Vector2(320, 0)
+	# Size the dock for the largest tab so switching tabs never resizes it.
+	dock_tabs.use_hidden_tabs_for_min_size = true
 	dock_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	dock_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	dock_tabs.name = "Codex Tools"
@@ -487,11 +583,8 @@ func _build_dock() -> void:
 	call_deferred("_focus_codex_chat_panel")
 	_update_ui()
 
-	# Auto-connect on open when chat is allowed and a launcher is configured,
-	# so the common case needs no manual "Connect" press. Connect stays as a
-	# fallback/reconnect button.
-	if _permission_enabled("allow_codex_chat") and not _host_config.is_empty():
-		call_deferred("_connect_chat_host")
+	# Pairing requires a code entered by the editor user, so connection starts
+	# from the dock's Connect action. Project configuration never starts a process.
 
 
 func _has_main_screen() -> bool:
@@ -636,28 +729,35 @@ func _create_bridge_panel() -> Control:
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_child(panel)
 
-	var title := Label.new()
-	title.text = PLUGIN_NAME
-	title.add_theme_font_size_override("font_size", 16)
-	panel.add_child(title)
+	# One compact status line; the dock tab already names the plugin.
+	var status_row := HBoxContainer.new()
+	status_row.add_theme_constant_override("separation", 6)
+	panel.add_child(status_row)
+	_dock_status_dot = ColorRect.new()
+	_dock_status_dot.custom_minimum_size = Vector2(8, 8)
+	_dock_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_dock_status_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_row.add_child(_dock_status_dot)
+	_dock_status_label = Label.new()
+	_dock_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_dock_status_label.clip_text = true
+	_dock_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_dock_status_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	status_row.add_child(_dock_status_label)
 
-	var status_label := Label.new()
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	panel.add_child(status_label)
-	_status_labels.append(status_label)
+	_addon_update_panel = AddonUpdatePanel.new()
+	_addon_update_panel.check_pressed.connect(_check_addon_update)
+	_addon_update_panel.update_confirmed.connect(_schedule_addon_update)
+	_addon_update_panel.cancel_pressed.connect(_cancel_addon_update)
+	panel.add_child(DockStyle.section_header(_dock_style, "Updates"))
+	panel.add_child(_addon_update_panel)
+	DockStyle.apply_icon(_addon_update_panel.check_button, _dock_style, "Reload", false, false)
+	_apply_addon_update_view()
 
-	var snapshot_label := Label.new()
-	snapshot_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	panel.add_child(snapshot_label)
-	_snapshot_labels.append(snapshot_label)
-
-	var pending_label := Label.new()
-	pending_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	panel.add_child(pending_label)
-	_pending_labels.append(pending_label)
-
+	panel.add_child(DockStyle.section_header(_dock_style, "Context"))
 	var button_row := HBoxContainer.new()
 	button_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button_row.add_theme_constant_override("separation", DockStyle.SPACE_S)
 	panel.add_child(button_row)
 
 	var refresh_button := Button.new()
@@ -683,44 +783,149 @@ func _create_bridge_panel() -> Control:
 	send_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	send_button.pressed.connect(_send_context_to_agent_from_ui)
 	button_row.add_child(send_button)
+	DockStyle.apply_icon(refresh_button, _dock_style, "Reload", false, false)
+	DockStyle.apply_icon(screenshot_button, _dock_style, "Image", false, false)
+	DockStyle.apply_icon(send_button, _dock_style, "ArrowRight", false, false)
 
-	var permissions_title := Label.new()
-	permissions_title.text = "Permissions"
-	panel.add_child(permissions_title)
+	panel.add_child(DockStyle.section_header(_dock_style, "Permissions"))
+	var profile_row := HBoxContainer.new()
+	profile_row.add_theme_constant_override("separation", 6)
+	panel.add_child(profile_row)
+	var profile_label := Label.new()
+	profile_label.text = "Profile"
+	profile_row.add_child(profile_label)
+	_permission_profile_option = OptionButton.new()
+	_permission_profile_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_permission_profile_option.clip_text = true
+	for profile in PermissionProfileModel.profiles():
+		var profile_dict := profile as Dictionary
+		_permission_profile_option.add_item(str(profile_dict.get("label", "")))
+		var index := _permission_profile_option.item_count - 1
+		_permission_profile_option.set_item_metadata(index, str(profile_dict.get("id", "")))
+		_permission_profile_option.set_item_tooltip(index, str(profile_dict.get("description", "")))
+	_permission_profile_option.add_item("Custom")
+	_permission_profile_option.set_item_metadata(_permission_profile_option.item_count - 1, PermissionProfileModel.CUSTOM_PROFILE_ID)
+	_permission_profile_option.set_item_disabled(_permission_profile_option.item_count - 1, true)
+	_permission_profile_option.item_selected.connect(_on_permission_profile_selected)
+	profile_row.add_child(_permission_profile_option)
 
-	_add_permission_checkbox(panel, "allow_screenshots", "Screenshots")
-	_add_permission_checkbox(panel, "allow_ai_markers", "AI marker attachments")
-	_add_permission_checkbox(panel, "allow_open_scene", "Open scene")
-	_add_permission_checkbox(panel, "allow_run_current_scene", "Run current scene")
-	_add_permission_checkbox(panel, "allow_fix_selected_node", "Fix selected node")
+	_permission_full_trust_dialog = ConfirmationDialog.new()
+	_permission_full_trust_dialog.title = "Full Trust permissions"
+	_permission_full_trust_dialog.dialog_text = str(PermissionProfileModel.profile_metadata("full_trust").get("profile_description", "")) + "\n\nApply the Full Trust profile?"
+	_permission_full_trust_dialog.confirmed.connect(func() -> void: _apply_permission_profile("full_trust"))
+	_permission_full_trust_dialog.canceled.connect(_sync_permission_controls)
+	panel.add_child(_permission_full_trust_dialog)
 
-	var editor_permissions_title := Label.new()
-	editor_permissions_title.text = "Editor Control"
-	panel.add_child(editor_permissions_title)
+	var advanced := _create_advanced_permissions_section()
+	panel.add_child(advanced)
+	_sync_permission_controls()
 
-	_add_permission_checkbox(panel, "allow_editor_navigation", "Navigate editor")
-	_add_permission_checkbox(panel, "allow_editor_inspect", "Inspect/select nodes")
-	_add_permission_checkbox(panel, "allow_editor_diagnostics", "Diagnostics capture")
-	_add_permission_checkbox(panel, "allow_clear_diagnostics", "Clear diagnostics")
-	_add_permission_checkbox(panel, "allow_animation_preview", "Animation preview")
-	_add_permission_checkbox(panel, "allow_scene_edits", "Scene edits via UndoRedo")
-	_add_permission_checkbox(panel, "allow_scene_save", "Save scenes")
-	_add_permission_checkbox(panel, "allow_bridge_notes", "Bridge notes")
+	return scroll
 
-	var chat_permissions_title := Label.new()
-	chat_permissions_title.text = "Chat"
-	panel.add_child(chat_permissions_title)
 
-	_add_permission_checkbox(panel, "allow_send_context", "Send context")
-	_add_permission_checkbox(panel, "allow_codex_chat", "Codex chat")
-	_add_permission_checkbox(panel, "allow_background_team_review", "Background team review")
-
+## Individual permission checkboxes, collapsed by default. Their behaviour is
+## unchanged; the profile dropdown above only sets the same keys in bulk.
+func _create_advanced_permissions_section() -> Container:
+	var body := VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_add_permission_group(body, "Permissions", [
+		["allow_screenshots", "Screenshots"],
+		["allow_ai_markers", "AI marker attachments"],
+		["allow_open_scene", "Open scene"],
+		["allow_run_current_scene", "Run current scene"],
+	])
+	_add_permission_group(body, "Editor Control", [
+		["allow_editor_navigation", "Navigate editor"],
+		["allow_editor_inspect", "Inspect/select nodes"],
+		["allow_editor_diagnostics", "Diagnostics capture"],
+		["allow_clear_diagnostics", "Clear diagnostics"],
+		["allow_animation_preview", "Animation preview"],
+		["allow_scene_edits", "Scene edits via UndoRedo"],
+		["allow_bridge_notes", "Bridge notes"],
+	])
+	_add_permission_group(body, "Chat", [
+		["allow_send_context", "Send context"],
+		["allow_codex_chat", "Codex chat"],
+		["allow_background_team_review", "Background team review"],
+	])
 	var detail_label := Label.new()
 	detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail_label.text = "Local bridge dir: " + BRIDGE_DIR
-	panel.add_child(detail_label)
+	body.add_child(detail_label)
 
-	return scroll
+	if ClassDB.class_exists("FoldableContainer"):
+		var foldable := ClassDB.instantiate("FoldableContainer") as Container
+		foldable.name = "AdvancedPermissions"
+		foldable.set("title", "Advanced permissions")
+		foldable.set("folded", not _advanced_permissions_expanded)
+		foldable.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		foldable.connect("folding_changed", func(is_folded: bool) -> void: _advanced_permissions_expanded = not is_folded)
+		foldable.add_child(body)
+		return foldable
+	var section := VBoxContainer.new()
+	section.name = "AdvancedPermissions"
+	var toggle := Button.new()
+	toggle.text = "Advanced permissions"
+	toggle.toggle_mode = true
+	toggle.button_pressed = _advanced_permissions_expanded
+	toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	body.visible = _advanced_permissions_expanded
+	toggle.toggled.connect(func(pressed: bool) -> void:
+		_advanced_permissions_expanded = pressed
+		body.visible = pressed
+	)
+	section.add_child(toggle)
+	section.add_child(body)
+	return section
+
+
+func _add_permission_group(body: VBoxContainer, title: String, entries: Array) -> void:
+	var group_title := Label.new()
+	group_title.text = title
+	body.add_child(group_title)
+	for entry in entries:
+		_add_permission_checkbox(body, str(entry[0]), str(entry[1]))
+
+
+func _on_permission_profile_selected(index: int) -> void:
+	var profile_id := str(_permission_profile_option.get_item_metadata(index))
+	if profile_id == PermissionProfileModel.CUSTOM_PROFILE_ID:
+		_sync_permission_controls()
+		return
+	# Full Trust also enables the Host full-machine Trust Session permission,
+	# so it asks first. The other profiles apply directly.
+	if profile_id == "full_trust" and _permission_full_trust_dialog != null:
+		_permission_full_trust_dialog.popup_centered(Vector2i(460, 200))
+		return
+	_apply_permission_profile(profile_id)
+
+
+func _apply_permission_profile(profile_id: String) -> void:
+	var profile_permissions := PermissionProfileModel.permissions_for_profile(profile_id)
+	for key in profile_permissions.keys():
+		_permissions[key] = bool(profile_permissions[key])
+	if not bool(_permissions.get("allow_screenshots", false)) and _annotation_controller != null:
+		_annotation_controller.invalidate_sensitive_capture()
+	_write_permissions()
+	_write_bridge_state(true)
+	_log_event("permission_profile_applied", {"profile": profile_id})
+	_sync_permission_controls()
+	_update_ui()
+
+
+func _sync_permission_controls() -> void:
+	for key in _permission_checkboxes.keys():
+		var checkbox := _permission_checkboxes[key] as CheckBox
+		if checkbox != null:
+			checkbox.set_pressed_no_signal(bool(_permissions.get(key, false)))
+	if _permission_profile_option == null:
+		return
+	var current := PermissionProfileModel.matching_profile_id(_permissions)
+	for index in range(_permission_profile_option.item_count):
+		if str(_permission_profile_option.get_item_metadata(index)) == current:
+			_permission_profile_option.select(index)
+			break
+	_permission_profile_option.tooltip_text = str(PermissionProfileModel.current_profile_metadata(_permissions).get("profile_description", ""))
 
 
 func _create_chat_panel() -> VBoxContainer:
@@ -737,6 +942,18 @@ func _create_chat_panel() -> VBoxContainer:
 	_chat_advanced_toggle.toggled.connect(_set_chat_advanced_visible)
 
 	_chat_advanced_panel = refs.get("advanced_panel") as VBoxContainer
+	_session_allow_row = HBoxContainer.new()
+	_session_allow_row.visible = false
+	_session_allow_label = Label.new()
+	_session_allow_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_session_allow_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	_session_allow_row.add_child(_session_allow_label)
+	var forget_button := Button.new()
+	forget_button.text = "Forget"
+	forget_button.tooltip_text = "Ask again before every Godot tool use (clears this session's allowed tools on the Host)."
+	forget_button.pressed.connect(_forget_session_allowed_tools)
+	_session_allow_row.add_child(forget_button)
+	_chat_advanced_panel.add_child(_session_allow_row)
 
 	_chat_readiness_label = refs.get("readiness_label") as Label
 	_chat_thread_label = refs.get("thread_label") as Label
@@ -749,16 +966,36 @@ func _create_chat_panel() -> VBoxContainer:
 
 	_chat_connect_button = refs.get("connect_button") as Button
 	_chat_connect_button.pressed.connect(_connect_chat_host)
+	_host_pair_dialog = ConfirmationDialog.new()
+	_host_pair_dialog.title = "Pair with Codex Host"
+	_host_pair_dialog.dialog_text = "Paste the pairing secret shown in the trusted Host launcher. It is kept only for this connection."
+	_host_pair_input = LineEdit.new()
+	_host_pair_input.placeholder_text = "64-character pairing secret"
+	_host_pair_input.secret = true
+	_host_pair_dialog.get_label().get_parent().add_child(_host_pair_input)
+	_host_pair_dialog.register_text_enter(_host_pair_input)
+	_host_pair_dialog.confirmed.connect(_confirm_host_pairing)
+	_host_pair_dialog.canceled.connect(func() -> void:
+		_host_pair_input.clear()
+	)
+	panel.add_child(_host_pair_dialog)
 	_chat_cancel_button = refs.get("cancel_button") as Button
 	_chat_cancel_button.pressed.connect(_cancel_chat_turn)
 	_chat_enable_tools_button = refs.get("enable_tools_button") as Button
 	_chat_enable_tools_button.pressed.connect(_enable_bridge_tools)
 
 	_chat_model_option = refs.get("model_option") as OptionButton
+	# item_selected fires only for user picks (select() does not emit it), so
+	# only explicit choices are remembered.
 	_chat_model_option.item_selected.connect(func(_index: int) -> void:
+		_model_preference.save_model(_selected_chat_model())
 		_apply_runtime_model_options_effects(_chat_model_selection_effects())
 	)
 	_chat_reasoning_option = refs.get("reasoning_option") as OptionButton
+	_chat_reasoning_option.item_selected.connect(func(_index: int) -> void:
+		_model_preference.save_effort(_selected_chat_reasoning())
+		_update_chat_ui()
+	)
 	_populate_default_runtime_options()
 
 	_chat_trust_button = refs.get("trust_button") as CheckButton
@@ -783,6 +1020,18 @@ func _create_chat_panel() -> VBoxContainer:
 
 	_chat_composer_toggle_button = refs.get("composer_toggle_button") as Button
 	_chat_composer_toggle_button.pressed.connect(_toggle_chat_composer_expanded)
+	# Always-visible model/effort summary next to the composer controls.
+	_chat_model_badge = Button.new()
+	_chat_model_badge.flat = true
+	_chat_model_badge.clip_text = true
+	_chat_model_badge.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_chat_model_badge.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_chat_model_badge.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_chat_model_badge.custom_minimum_size = Vector2(60, 0)
+	_chat_model_badge.pressed.connect(func() -> void: _set_chat_advanced_visible(true))
+	var composer_row := _chat_composer_toggle_button.get_parent()
+	composer_row.add_child(_chat_model_badge)
+	composer_row.move_child(_chat_model_badge, _chat_composer_toggle_button.get_index() + 1)
 	_set_chat_composer_expanded(false)
 
 	_chat_attach_context = refs.get("attach_context") as CheckBox
@@ -809,6 +1058,18 @@ func _create_chat_panel() -> VBoxContainer:
 	_chat_approval_title = refs.get("approval_title") as Label
 	_chat_approval_body = refs.get("approval_body") as TextEdit
 	_chat_approval_note = refs.get("approval_note") as LineEdit
+	_approval_review_button = refs.get("approval_review_button") as Button
+	_chat_allow_session_button = refs.get("allow_session_button") as Button
+	if _chat_allow_session_button != null:
+		_chat_allow_session_button.pressed.connect(func() -> void:
+			_respond_to_chat_approval(ChatApprovalModel.DECISION_APPROVE_REMEMBER)
+		)
+	if _approval_review_button != null:
+		_approval_review_button.pressed.connect(_open_approval_review)
+	_approval_popup = ChatApprovalPopup.new()
+	_approval_popup.apply_style(_dock_style, _chat_theme_palette())
+	_approval_popup.decision_requested.connect(_on_approval_popup_decision)
+	EditorInterface.get_base_control().add_child(_approval_popup)
 
 	_chat_approve_button = refs.get("approve_button") as Button
 	_chat_approve_button.pressed.connect(func() -> void:
@@ -838,13 +1099,14 @@ func _create_chat_panel() -> VBoxContainer:
 	_chat_jump_latest_button = refs.get("jump_latest_button") as Button
 	_chat_jump_latest_button.pressed.connect(_jump_chat_to_latest)
 	_setup_chat_transcript_view()
+	_apply_chat_dock_style()
 
 	_set_chat_advanced_visible(false)
 
 	if _host_config.is_empty():
 		_append_chat_system("Press Connect. If Codex cannot start, refresh the addon install.")
 	else:
-		_append_chat_system("Connecting to Codex automatically. Use Connect to retry if needed.")
+		_append_chat_system("Looking for an already-running trusted Host. If unavailable, start it from the trusted installation, then press Connect.")
 	_update_chat_ui()
 	return panel
 
@@ -857,9 +1119,90 @@ func _refresh_gc_work_status() -> void:
 	if channel_path != "":
 		available = GcWorkChannelModel.load_manifest(channel_path)
 	var next_status := GcWorkChannelModel.status(installed, available)
+	_addon_update.set_local(installed, next_status)
 	if next_status != _gc_work_status:
 		_gc_work_status = next_status
 		_apply_gc_work_status()
+		_apply_addon_update_view()
+
+
+func _apply_addon_update_view() -> void:
+	if _addon_update_panel == null:
+		return
+	_addon_update.set_paired(_host_paired)
+	_addon_update_panel.apply(_addon_update.view(), _addon_update.confirmation_text())
+
+
+func _check_addon_update() -> void:
+	_refresh_gc_work_status()
+	if _addon_update.begin_check():
+		_send_addon_update_rpc(AddonUpdateModel.METHOD_CHECK, {})
+	_apply_addon_update_view()
+
+
+func _schedule_addon_update() -> void:
+	var params := _addon_update.begin_schedule(OS.get_process_id(), OS.get_executable_path())
+	if not params.is_empty():
+		_send_addon_update_rpc(AddonUpdateModel.METHOD_SCHEDULE, params)
+	_apply_addon_update_view()
+
+
+func _cancel_addon_update() -> void:
+	if _addon_update.begin_cancel():
+		_send_addon_update_rpc(AddonUpdateModel.METHOD_CANCEL, {})
+	_apply_addon_update_view()
+
+
+func _send_addon_update_rpc(method: String, params: Dictionary) -> void:
+	var previous_id := _chat_request_id
+	_send_chat_json(method, params)
+	if _chat_request_id == previous_id or not _chat_request_methods.has(_chat_request_id):
+		_addon_update.apply_response(method, null, {"message": "The Codex Host connection is not open."})
+
+
+func _handle_addon_update_response(method: String, message: Dictionary) -> void:
+	var error_value: Variant = message.get("error", {})
+	var error: Dictionary = error_value if typeof(error_value) == TYPE_DICTIONARY else {"message": "invalid error"}
+	var effects := _addon_update.apply_response(method, message.get("result"), error if message.has("error") else {})
+	if method == AddonUpdateModel.METHOD_CANCEL and _addon_update.phase == "idle":
+		AddonUpdateModel.clear_scheduled_id(_addon_update_scheduled_id_path())
+	_apply_addon_update_view()
+	if bool(effects.get("close_editor", false)):
+		var update_id := str(_addon_update.host_check.get("update_id", ""))
+		if not AddonUpdateModel.write_scheduled_id(_addon_update_scheduled_id_path(), update_id):
+			_log_event("addon_update_id_not_persisted", {"update_id": update_id})
+		_log_event("addon_update_scheduled", {"update_id": update_id})
+		call_deferred("_request_editor_close")
+
+
+## Godot's own close request: EditorNode asks about unsaved changes and the
+## user may cancel. The Bridge never saves and never force-quits.
+func _request_editor_close() -> void:
+	get_tree().root.propagate_notification(NOTIFICATION_WM_CLOSE_REQUEST)
+
+
+func _addon_update_scheduled_id_path() -> String:
+	var paths := EditorInterface.get_editor_paths()
+	return AddonUpdateModel.scheduled_id_path(paths.get_data_dir() if paths != null else "", ProjectSettings.globalize_path("res://"))
+
+
+func _show_addon_update_result() -> void:
+	var id_path := _addon_update_scheduled_id_path()
+	var scheduled_id := AddonUpdateModel.read_scheduled_id(id_path)
+	var result_path := _bridge_dir_abs.path_join(AddonUpdateModel.RESULT_FILE_NAME)
+	if scheduled_id == "" or not bool(_validate_bridge_path(result_path, true).get("ok", false)):
+		return
+	var result := AddonUpdateModel.read_json_file(result_path)
+	var notice := AddonUpdateModel.startup_notice(result, scheduled_id)
+	if notice.is_empty():
+		if not result.is_empty():
+			_log_event("addon_update_result_ignored", {"reason": "update_id does not match the update this editor scheduled"})
+		return
+	AddonUpdateModel.clear_scheduled_id(id_path)
+	_addon_update.notice = str(notice.get("text", ""))
+	_addon_update.notice_tone = str(notice.get("tone", "neutral"))
+	_append_chat_system(_addon_update.notice)
+	_apply_addon_update_view()
 
 
 func _apply_gc_work_status() -> void:
@@ -867,13 +1210,9 @@ func _apply_gc_work_status() -> void:
 		return
 	_chat_build_label.text = str(_gc_work_status.get("label", "Addon: unmanaged"))
 	_chat_build_label.tooltip_text = str(_gc_work_status.get("tooltip", ""))
-	match str(_gc_work_status.get("tone", "neutral")):
-		"ok":
-			_chat_build_label.add_theme_color_override("font_color", Color(0.42, 0.86, 0.58))
-		"warn":
-			_chat_build_label.add_theme_color_override("font_color", Color(0.92, 0.72, 0.34))
-		_:
-			_chat_build_label.add_theme_color_override("font_color", Color(0.72, 0.74, 0.78))
+	# Build label stays muted unless it needs attention.
+	var build_tone := str(_gc_work_status.get("tone", "neutral"))
+	_chat_build_label.add_theme_color_override("font_color", DockStyle.tone_color(_dock_style, "warn") if build_tone == "warn" else _dock_style.get("muted", DockStyle.FALLBACK["muted"]))
 
 
 func _set_chat_advanced_visible(visible: bool) -> void:
@@ -1005,6 +1344,7 @@ func _setup_chat_transcript_view() -> void:
 			"work_preview_chars": CHAT_WORK_PREVIEW_CHARS,
 			"work_preview_lines": CHAT_WORK_PREVIEW_LINES,
 			"palette": _chat_theme_palette(),
+			"code_font": _dock_style.get("code_font"),
 		}
 	)
 
@@ -1020,8 +1360,10 @@ func _add_permission_checkbox(panel: VBoxContainer, key: String, label: String) 
 		_write_permissions()
 		_write_bridge_state(true)
 		_log_event("permission_changed", {"permission": key, "enabled": pressed})
+		_sync_permission_controls()
 		_update_ui()
 	)
+	_permission_checkboxes[key] = checkbox
 	panel.add_child(checkbox)
 
 
@@ -1074,12 +1416,19 @@ func _update_ui() -> void:
 	for label in _pending_labels:
 		if label != null:
 			label.text = "Pending requests: " + pending_count
+	if _dock_status_label != null:
+		var summary := BridgeDockStatusModel.summary(_last_status, _last_snapshot_time, int(pending_count), int(Time.get_time_zone_from_system().get("bias", 0)))
+		_dock_status_label.text = str(summary.get("text", ""))
+		_dock_status_label.tooltip_text = str(summary.get("tooltip", ""))
+		_dock_status_dot.color = DockStyle.tone_color(_dock_style, str(summary.get("tone", "ok")))
 	_update_chat_ui()
 
 
 func _count_pending_requests() -> int:
+	if not bool(_validate_bridge_path(_requests_dir_abs, false).get("ok", false)):
+		return 0
 	var pending := 0
-	for file_name in _list_files_with_extension(_requests_dir_abs, ".json"):
+	for file_name in _list_files_with_extension(_requests_dir_abs, ".json", MAX_REQUEST_QUEUE_FILES + 1):
 		var response_path := _responses_dir_abs.path_join(str(file_name))
 		if not FileAccess.file_exists(response_path):
 			pending += 1
@@ -1087,12 +1436,20 @@ func _count_pending_requests() -> int:
 
 
 func _ensure_bridge_dirs() -> void:
-	for dir_path in [_bridge_dir_abs, _requests_dir_abs, _responses_dir_abs, _screenshots_dir_abs, _annotations_dir_abs, _bridge_dir_abs.path_join("artifacts")]:
+	for dir_path in [_bridge_dir_abs, _requests_dir_abs, _responses_dir_abs, _journal_dir_abs, _screenshots_dir_abs, _annotations_dir_abs, _bridge_dir_abs.path_join("artifacts")]:
 		if dir_path == "":
 			continue
-		var err := DirAccess.make_dir_recursive_absolute(dir_path)
-		if err != OK and err != ERR_ALREADY_EXISTS:
-			_log_event("directory_error", {"path": dir_path, "error": error_string(err)})
+		var result := _ensure_safe_bridge_directory(dir_path)
+		if not bool(result.get("ok", false)):
+			_log_event("directory_error", {"path": dir_path, "error": result.get("error", {})})
+
+
+func _ensure_safe_bridge_directory(dir_path: String) -> Dictionary:
+	return BridgePathGuard.ensure_project_directory(ProjectSettings.globalize_path("res://"), dir_path)
+
+
+func _validate_bridge_path(path_value: String, allow_missing_tail := false) -> Dictionary:
+	return BridgePathGuard.validate_project_path(ProjectSettings.globalize_path("res://"), path_value, allow_missing_tail)
 
 
 func _write_context_snapshot(reason: String) -> Dictionary:
@@ -1268,6 +1625,9 @@ func _capture_viewport_screenshot(reason: String) -> Dictionary:
 
 	var file_name := "viewport_3d_" + _file_timestamp() + ".png"
 	var abs_path := _screenshots_dir_abs.path_join(file_name)
+	var path_guard := _validate_bridge_path(abs_path, true)
+	if not bool(path_guard.get("ok", false)):
+		return {"ok": false, "error": path_guard.get("error", _error_payload("screenshot_path_rejected", "Screenshot path is unsafe."))}
 	var err := image.save_png(abs_path)
 	if err != OK:
 		var save_error := _error_payload("screenshot_save_failed", "Failed to save viewport screenshot: " + error_string(err))
@@ -1289,6 +1649,21 @@ func _camera_payload(camera: Camera3D) -> Variant:
 func _screenshot_metadata(file_name: String, abs_path: String, width: int, height: int, reason: String, camera: Camera3D) -> Dictionary:
 	return _introspection._screenshot_metadata(file_name, abs_path, width, height, reason, camera)
 func _connect_chat_host() -> void:
+	if _host_pair_secret == "" and not _host_paired:
+		if _one_click_waiting:
+			_append_chat_system("Starting the Codex Host…")
+			return
+		if _one_click_secret != "" and not OS.is_process_running(_one_click_launcher_pid):
+			_forget_one_click_session()
+		if _one_click_secret != "" and _one_click_url != "":
+			# The Host this editor launched: pair again with its in-memory secret.
+			_host_pair_secret = _one_click_secret
+		elif not _try_one_click_launch():
+			if _host_pair_dialog != null:
+				_host_pair_dialog.popup_centered(Vector2i(520, 180))
+			return
+		else:
+			return
 	var socket_present := _chat_socket != null
 	var socket_state := WebSocketPeer.STATE_CLOSED
 	if socket_present:
@@ -1299,6 +1674,18 @@ func _connect_chat_host() -> void:
 		socket_state
 	)
 	_apply_chat_connect_request_effects(connect_plan.get("effects", []) as Array)
+
+
+func _confirm_host_pairing() -> void:
+	if _host_pair_input == null:
+		return
+	var supplied := _host_pair_input.text.strip_edges()
+	_host_pair_input.clear()
+	if supplied.length() != 64 or not supplied.is_valid_hex_number():
+		_append_chat_system("Pairing secret must be 64 hexadecimal characters from the Host launcher.")
+		return
+	_host_pair_secret = supplied.to_lower()
+	_connect_chat_host()
 
 
 func _apply_chat_connect_request_effects(effects: Array) -> void:
@@ -1323,9 +1710,20 @@ func _apply_chat_connect_request_effects(effects: Array) -> void:
 
 
 func _attempt_chat_socket_connect(log_attempt: bool) -> void:
+	var one_click := _one_click_url != "" and _one_click_secret != "" and _host_pair_secret == _one_click_secret
+	var target_url := _one_click_url if one_click else _codex_host_url
+	if not one_click and (_host_config_status != "manual_start_required" or _codex_host_url == ""):
+		_chat_connection_state = "disconnected"
+		_append_chat_system(_host_config_message)
+		_update_chat_ui()
+		return
 	_chat_socket = WebSocketPeer.new()
-	var err := _chat_socket.connect_to_url(_codex_host_url)
-	var connect_plan := ChatSocketController.connect_result_effect_plan(err, _codex_host_url, log_attempt)
+	_host_pairing_sent = false
+	_host_paired = false
+	_host_pair_client_nonce = ""
+	_host_pair_server_nonce = ""
+	var err := _chat_socket.connect_to_url(target_url)
+	var connect_plan := ChatSocketController.connect_result_effect_plan(err, target_url, log_attempt)
 	_apply_chat_connect_result_effects(connect_plan.get("effects", []))
 
 
@@ -1348,6 +1746,13 @@ func _apply_chat_connect_result_effects(effects: Array) -> void:
 
 
 func _disconnect_chat_host(stop_owned_host := false, reason := "disconnect") -> void:
+	_host_pair_secret = ""
+	_host_pairing_sent = false
+	_host_paired = false
+	_host_pair_client_nonce = ""
+	_host_pair_server_nonce = ""
+	if _host_pair_input != null:
+		_host_pair_input.clear()
 	var disconnect_plan := ChatSocketController.disconnect_request_effect_plan(stop_owned_host, _chat_socket != null, _chat_runtime_state, reason)
 	_apply_chat_disconnect_request_effects(disconnect_plan.get("effects", []) as Array)
 
@@ -1376,6 +1781,172 @@ func _apply_chat_disconnect_request_effects(effects: Array) -> void:
 				_chat_auto_enable_tools_requested = bool(state.get("chat_auto_enable_tools_requested", false))
 			"update_ui":
 				_update_chat_ui()
+
+
+## Returns true when a trusted launch started (the caller waits for it). Returns
+## false, after explaining why, when the manual pairing dialog should be used.
+func _try_one_click_launch() -> bool:
+	var local_app_data := OS.get_environment("LOCALAPPDATA")
+	var record := TrustedHostLaunchModel.read_json(TrustedHostLaunchModel.record_path(local_app_data))
+	var validation := TrustedHostLaunchModel.validate_record(record, ProjectSettings.globalize_path("res://"))
+	if not bool(validation.get("ok", false)):
+		if str(validation.get("error_code", "")) == "missing":
+			_append_chat_system("One-click Connect is not set up yet. " + TrustedHostLaunchModel.setup_text() + "\nOr paste a pairing code now.")
+		else:
+			_append_chat_system("One-click Connect is unavailable: " + str(validation.get("message", "")) + " Paste a pairing code instead.")
+		return false
+	var trusted := validation.get("record", {}) as Dictionary
+	if _host_port_listening(int(trusted.get("port", 0))):
+		_append_chat_system("A Codex Host is already running; paste its pairing code or wait until it stops.")
+		return false
+	return _launch_trusted_host(trusted)
+
+
+func _launch_trusted_host(record: Dictionary) -> bool:
+	if not TrustedHostLaunchModel.start_script_matches(record):
+		_append_chat_system(TrustedHostLaunchModel.script_changed_message())
+		return false
+	var secret := Crypto.new().generate_random_bytes(32).hex_encode()
+	var args := TrustedHostLaunchModel.launch_args(record, ProjectSettings.globalize_path("res://"), OS.get_process_id())
+	# The secret reaches the launcher only through its inherited environment.
+	OS.set_environment(TrustedHostLaunchModel.SECRET_ENV, secret)
+	var launcher_pid := OS.create_process(str(record.get("powershell_executable", "")), args, false)
+	OS.unset_environment(TrustedHostLaunchModel.SECRET_ENV)
+	if launcher_pid <= 0:
+		_append_chat_system("Could not start the trusted Codex Host launcher. Paste a pairing code instead.")
+		return false
+	_one_click_record = record
+	_one_click_secret = secret
+	_one_click_url = ""
+	_one_click_launcher_pid = launcher_pid
+	_one_click_host_pid = -1
+	_one_click_launched_unix = Time.get_unix_time_from_system()
+	_one_click_deadline_msec = Time.get_ticks_msec() + int(TrustedHostLaunchModel.LAUNCH_TIMEOUT_SECONDS * 1000.0)
+	_one_click_waiting = true
+	_chat_connection_state = "connecting"
+	_append_chat_system("Starting the trusted Codex Host…")
+	_log_event("codex_host_one_click_launch", {"launcher_pid": launcher_pid, "install_root": str(record.get("install_root", ""))})
+	_update_chat_ui()
+	return true
+
+
+func _poll_one_click_launch() -> void:
+	if not _one_click_waiting:
+		return
+	var status_path := TrustedHostLaunchModel.launch_status_path(OS.get_environment("LOCALAPPDATA"), OS.get_process_id())
+	var state := TrustedHostLaunchModel.launch_state(TrustedHostLaunchModel.read_json(status_path), _one_click_launched_unix, _one_click_record)
+	match str(state.get("state", "waiting")):
+		"ready":
+			_one_click_waiting = false
+			_one_click_owned = true
+			var status := TrustedHostLaunchModel.read_json(status_path)
+			_one_click_host_pid = int(status.get("host_pid", -1)) if typeof(status.get("host_pid")) in [TYPE_INT, TYPE_FLOAT] else -1
+			_one_click_url = ChatHostConfigModel.host_url(int(_one_click_record.get("port", 0)))
+			_host_pair_secret = _one_click_secret
+			_connect_chat_host()
+		"fingerprint_changed":
+			_end_one_click_launch("")
+			_show_retrust_dialog(str(state.get("new_fingerprint", "")))
+		"untrusted":
+			_end_one_click_launch("The Host installation is not trusted: " + str(state.get("message", "")) + "\nSetup: " + TrustedHostLaunchModel.setup_text())
+		"failed":
+			_end_one_click_launch("Codex Host failed to start: " + str(state.get("message", "")))
+		_:
+			if Time.get_ticks_msec() > _one_click_deadline_msec:
+				# Keep the secret: if the Host comes up later, Connect pairs with it.
+				_one_click_waiting = false
+				_one_click_url = ChatHostConfigModel.host_url(int(_one_click_record.get("port", 0)))
+				_chat_connection_state = "disconnected"
+				_append_chat_system("The Codex Host did not report ready within %d s. Press Connect to retry. Launch status: %s" % [int(TrustedHostLaunchModel.LAUNCH_TIMEOUT_SECONDS), status_path])
+				_update_chat_ui()
+
+
+func _end_one_click_launch(message: String) -> void:
+	var record := _one_click_record
+	_forget_one_click_session()
+	_one_click_record = record
+	_chat_connection_state = "disconnected"
+	if message != "":
+		_append_chat_system(message)
+	_update_chat_ui()
+
+
+func _forget_one_click_session() -> void:
+	_one_click_secret = ""
+	_one_click_url = ""
+	_one_click_waiting = false
+	_one_click_owned = false
+	_one_click_launcher_pid = -1
+	_one_click_host_pid = -1
+
+
+func _show_retrust_dialog(new_fingerprint: String) -> void:
+	# In-addon re-trust only when the start script is still the trusted one and
+	# the launcher reported a well-formed new fingerprint to confirm.
+	if new_fingerprint == "" or not TrustedHostLaunchModel.start_script_matches(_one_click_record):
+		_append_chat_system(TrustedHostLaunchModel.script_changed_message() if new_fingerprint != "" else "The Host installation changed and no new fingerprint was reported. " + TrustedHostLaunchModel.setup_text())
+		return
+	_retrust_fingerprint = new_fingerprint
+	if _retrust_dialog == null:
+		_retrust_dialog = ConfirmationDialog.new()
+		_retrust_dialog.title = "Trust updated Codex Host?"
+		_retrust_dialog.ok_button_text = "Trust and connect"
+		_retrust_dialog.confirmed.connect(_retrust_and_connect)
+		_retrust_dialog.canceled.connect(func() -> void: _append_chat_system("The changed Host installation was not trusted. Paste a pairing code to connect manually."))
+		EditorInterface.get_base_control().add_child(_retrust_dialog)
+	_retrust_dialog.dialog_text = TrustedHostLaunchModel.retrust_dialog_text(_one_click_record, new_fingerprint)
+	_retrust_dialog.popup_centered(Vector2i(560, 220))
+
+
+## Runs `-Trust` with the executables of the existing record only after the user
+## confirmed the dialog, then connects again.
+func _retrust_and_connect() -> void:
+	var record := _one_click_record
+	if record.is_empty() or not TrustedHostLaunchModel.is_sha256_hex(_retrust_fingerprint):
+		return
+	if not TrustedHostLaunchModel.start_script_matches(record):
+		_append_chat_system(TrustedHostLaunchModel.script_changed_message())
+		return
+	var output: Array = []
+	var exit_code := OS.execute(str(record.get("powershell_executable", "")), TrustedHostLaunchModel.trust_args(record, _retrust_fingerprint), output, true)
+	if exit_code != 0:
+		var first_line := TrustedHostLaunchModel.plain_message(str(output[0]).strip_edges().get_slice("\n", 0)) if not output.is_empty() else ""
+		_append_chat_system("Re-trusting the Host failed (exit %d). %s" % [exit_code, first_line])
+		return
+	_append_chat_system("Trusted the updated Host installation.")
+	_connect_chat_host()
+
+
+## Ask the Host this editor launched to stop, unless an addon update is pending
+## (the Host installs it after the editor exits). The launcher also stops the
+## Host when this editor process exits.
+func _request_one_click_host_shutdown(reason: String) -> void:
+	if not _one_click_owned or not _addon_update.stop_owned_host_on_exit():
+		return
+	if _chat_socket == null or _chat_socket.get_ready_state() != WebSocketPeer.STATE_OPEN or not _host_paired:
+		return
+	_send_chat_json("host.shutdown", {"reason": reason, "owner": "godot_addon", "process_id": _one_click_host_pid})
+	_chat_socket.poll()
+
+
+func _host_port_listening(port: int) -> bool:
+	if port < 1 or port > 65535:
+		return false
+	var peer := StreamPeerTCP.new()
+	if peer.connect_to_host("127.0.0.1", port) != OK:
+		return false
+	var deadline := Time.get_ticks_msec() + 300
+	while Time.get_ticks_msec() < deadline:
+		peer.poll()
+		var status := peer.get_status()
+		if status == StreamPeerTCP.STATUS_CONNECTED:
+			peer.disconnect_from_host()
+			return true
+		if status == StreamPeerTCP.STATUS_ERROR or status == StreamPeerTCP.STATUS_NONE:
+			return false
+		OS.delay_msec(10)
+	peer.disconnect_from_host()
+	return false
 
 
 func _stop_owned_codex_host(reason: String) -> void:
@@ -1450,6 +2021,13 @@ func _apply_chat_poll_socket_effects(effects: Array) -> bool:
 
 
 func _apply_chat_open_socket_effects(effects: Array) -> void:
+	if not _host_paired:
+		if not _host_pairing_sent and _host_pair_secret != "":
+			_host_pairing_sent = true
+			_host_pair_client_nonce = Crypto.new().generate_random_bytes(32).hex_encode()
+			_send_chat_json("host.pair", {"client_nonce": _host_pair_client_nonce})
+		_drain_chat_packets()
+		return
 	for effect in effects:
 		if typeof(effect) != TYPE_DICTIONARY:
 			continue
@@ -1529,6 +2107,14 @@ func _apply_chat_closed_socket_effects(effects: Array) -> bool:
 
 
 func _apply_chat_closed_socket_state_patch(patch: Dictionary) -> void:
+	if not _host_paired and _one_click_secret != "" and _host_pair_secret == _one_click_secret:
+		# The launched Host is gone or rejected its own secret; relaunch next time.
+		_forget_one_click_session()
+	_host_pair_secret = ""
+	_host_pairing_sent = false
+	_host_paired = false
+	_host_pair_client_nonce = ""
+	_host_pair_server_nonce = ""
 	_chat_connection_state = str(patch.get("connection_state", "disconnected"))
 	_chat_runtime_state = str(patch.get("runtime_state", "disconnected"))
 	_chat_trust_mode = str(patch.get("trust_mode", "off"))
@@ -1648,9 +2234,88 @@ func _drain_chat_packets() -> void:
 
 
 func _handle_chat_packet(text: String) -> void:
+	var raw_message: Variant = JSON.parse_string(text)
+	if typeof(raw_message) == TYPE_DICTIONARY:
+		var message := raw_message as Dictionary
+		var request_id := int(message.get("id", -1))
+		var pair_method := str(_chat_request_methods.get(request_id, ""))
+		if request_id >= 0 and pair_method == "host.pair":
+			_chat_request_methods.erase(request_id)
+			var result: Variant = message.get("result", {})
+			if typeof(result) != TYPE_DICTIONARY:
+				_fail_host_pairing()
+				return
+			var proof_result := result as Dictionary
+			var server_nonce := str(proof_result.get("server_nonce", ""))
+			var server_proof := str(proof_result.get("server_proof", ""))
+			if server_nonce.length() != 64 or not server_nonce.is_valid_hex_number():
+				_fail_host_pairing()
+				return
+			_host_pair_server_nonce = server_nonce.to_lower()
+			var expected_proof := _host_pair_hmac("host:" + _host_pair_client_nonce + ":" + _host_pair_server_nonce)
+			if expected_proof == "" or server_proof != expected_proof:
+				_fail_host_pairing()
+				return
+			_send_chat_json("host.pair_complete", {
+				"client_proof": _host_pair_hmac("addon:" + _host_pair_client_nonce + ":" + _host_pair_server_nonce)
+			})
+			return
+		if request_id >= 0 and pair_method == "host.pair_complete":
+			_chat_request_methods.erase(request_id)
+			var complete_result: Variant = message.get("result", {})
+			if typeof(complete_result) != TYPE_DICTIONARY or not bool((complete_result as Dictionary).get("paired", false)):
+				_fail_host_pairing()
+				return
+			_host_paired = true
+			_host_pair_secret = ""
+			_host_pair_client_nonce = ""
+			_host_pair_server_nonce = ""
+			_chat_connection_state = "ready"
+			_chat_runtime_state = "ready"
+			_append_chat_system("Paired with Codex Host.")
+			_reattach_chat_project()
+			_update_chat_ui()
+			return
+		if not _host_paired and str(message.get("method", "")) == "host.pair_required":
+			return
+		if _host_paired and request_id >= 0 and pair_method == ChatSessionAllowModel.CLEAR_METHOD:
+			_chat_request_methods.erase(request_id)
+			if message.has("error"):
+				var clear_error: Variant = message.get("error")
+				_append_chat_system("Could not forget allowed tools: " + (str((clear_error as Dictionary).get("message", "error")) if clear_error is Dictionary else "error"))
+			elif message.get("result") is Dictionary and (message.get("result") as Dictionary).get("cleared") == true:
+				_set_session_allowed_tools([])
+				_append_chat_system("Codex will ask again before using Godot tools.")
+			return
+		if _host_paired and request_id >= 0 and pair_method.begins_with("addon.update."):
+			_chat_request_methods.erase(request_id)
+			_handle_addon_update_response(pair_method, message)
+			return
+	if not _host_paired:
+		_append_chat_system("Host sent an unexpected message before pairing. Connection closed.")
+		if _chat_socket != null:
+			_chat_socket.close()
+		return
 	var packet := ChatSocketEventModel.classify_packet_text(text)
 	var plan := ChatSocketEventModel.packet_effect_plan(packet)
 	_apply_chat_packet_effects(plan.get("effects", []))
+
+
+func _host_pair_hmac(message: String) -> String:
+	var key := _host_pair_secret.hex_decode()
+	if key.size() != 32:
+		return ""
+	return Crypto.new().hmac_digest(HashingContext.HASH_SHA256, key, message.to_utf8_buffer()).hex_encode()
+
+
+func _fail_host_pairing() -> void:
+	_host_pair_secret = ""
+	_host_pair_client_nonce = ""
+	_host_pair_server_nonce = ""
+	_append_chat_system("Host pairing failed. Use Connect to enter the current launcher secret.")
+	if _chat_socket != null:
+		_chat_socket.close()
+	_update_chat_ui()
 
 
 func _apply_chat_packet_gate_effects(effects: Array) -> void:
@@ -1794,6 +2459,8 @@ func _apply_chat_host_status_patch(patch: Dictionary) -> void:
 		_chat_fatal_message = str(patch.get("fatal_message", _chat_fatal_message))
 	if patch.has("trust_mode"):
 		_chat_trust_mode = str(patch.get("trust_mode", _chat_trust_mode))
+	if patch.has("session_allowed_tools"):
+		_set_session_allowed_tools(patch.get("session_allowed_tools", []))
 	if patch.has("active_project_root"):
 		_chat_active_project_root = str(patch.get("active_project_root", _chat_active_project_root))
 	if patch.has("agents_count"):
@@ -1812,6 +2479,9 @@ func _apply_chat_token_usage_patch(patch: Dictionary) -> void:
 
 
 func _handle_chat_event(method: String, params: Dictionary) -> void:
+	if method == "approval.auto_approved":
+		_record_auto_approved(params)
+		return
 	var plan := ChatEventModel.event_handler_effect_plan(method, params, {
 		"runtime_state": _chat_runtime_state,
 		"thread_id": _chat_thread_id,
@@ -2082,6 +2752,114 @@ func _restore_background_status_from_tasks(tasks: Array) -> void:
 	_apply_chat_action_effects(ChatTeamModel.background_restore_effect_plan(plan).get("effects", []) as Array)
 
 
+## Popup lifecycle: opens by itself once per approval id, follows the active
+## approval and closes as soon as it is resolved, invalidated or replaced.
+## Closing the window is not a decision.
+func _present_approval_review() -> void:
+	if _approval_popup == null or _active_chat_approval.is_empty():
+		return
+	var approval_id := str(_active_chat_approval.get("approval_id", ""))
+	_approval_popup.set_review(approval_id, ChatApprovalReviewModel.review(_active_chat_approval))
+	if ChatApprovalReviewModel.should_auto_open(_active_chat_approval, _approval_popup_opened_ids):
+		if _approval_popup_opened_ids.size() > 64:
+			_approval_popup_opened_ids.clear()
+		_approval_popup_opened_ids[approval_id] = true
+		_approval_popup.open_centered()
+	_update_chat_ui()
+
+
+func _open_approval_review() -> void:
+	if _approval_popup == null or _active_chat_approval.is_empty():
+		return
+	if _approval_popup.approval_id != str(_active_chat_approval.get("approval_id", "")):
+		_approval_popup.set_review(str(_active_chat_approval.get("approval_id", "")), ChatApprovalReviewModel.review(_active_chat_approval))
+	_update_chat_ui()
+	_approval_popup.open_centered()
+
+
+func _sync_approval_popup() -> void:
+	if _approval_popup != null and ChatApprovalReviewModel.popup_stale(_approval_popup.approval_id, _active_chat_approval):
+		_approval_popup.close_review()
+
+
+func _on_approval_popup_decision(decision: String) -> void:
+	if _approval_popup == null or ChatApprovalReviewModel.popup_stale(_approval_popup.approval_id, _active_chat_approval):
+		# A late click on a review that is no longer active does nothing.
+		if _approval_popup != null:
+			_approval_popup.close_review()
+		return
+	var previous_request_id := _chat_request_id
+	_respond_to_chat_approval(decision)
+	if _chat_request_id != previous_request_id:
+		_approval_popup.hide()
+
+
+func _apply_chat_dock_style() -> void:
+	if _chat_advanced_toggle != null:
+		DockStyle.apply_icon(_chat_advanced_toggle, _dock_style, "Tools", true)
+	if _chat_build_label != null:
+		DockStyle.muted_label(_dock_style, _chat_build_label, 10)
+	if _chat_cancel_button != null:
+		DockStyle.apply_icon(_chat_cancel_button, _dock_style, "Stop", false)
+	if _chat_eye_button != null:
+		DockStyle.apply_icon(_chat_eye_button, _dock_style, "GuiVisibilityVisible", true)
+	if _chat_composer_toggle_button != null:
+		_chat_composer_toggle_button.set_meta("dock_icon_expand", DockStyle.icon(_dock_style, "ExpandTree"))
+		_chat_composer_toggle_button.set_meta("dock_icon_collapse", DockStyle.icon(_dock_style, "CollapseTree"))
+		DockStyle.apply_icon(_chat_composer_toggle_button, _dock_style, "ExpandTree", true)
+	if _chat_send_button != null:
+		DockStyle.apply_accent_button(_chat_send_button, _dock_style)
+	if _chat_jump_latest_button != null:
+		DockStyle.apply_icon(_chat_jump_latest_button, _dock_style, "ArrowDown", false, false)
+	if _approval_review_button != null:
+		DockStyle.apply_icon(_approval_review_button, _dock_style, "Search", false)
+	if _chat_approve_button != null:
+		DockStyle.apply_accent_button(_chat_approve_button, _dock_style)
+	if _chat_approval_panel != null:
+		_chat_approval_panel.add_theme_constant_override("separation", DockStyle.SPACE_S)
+	if _chat_approval_title != null:
+		_chat_approval_title.add_theme_color_override("font_color", DockStyle.tone_color(_dock_style, "warn"))
+	if _chat_input != null:
+		var focus_box := DockStyle.card_box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, Vector2(DockStyle.SPACE_M, DockStyle.SPACE_S))
+		focus_box.draw_center = false
+		focus_box.set_border_width_all(1)
+		focus_box.border_color = _dock_style.get("accent", DockStyle.FALLBACK["accent"])
+		_chat_input.add_theme_stylebox_override("focus", focus_box)
+
+
+func _set_session_allowed_tools(value: Variant) -> void:
+	_chat_session_allowed_tools = ChatSessionAllowModel.sanitize_tools(value)
+	if _session_allow_row != null:
+		_session_allow_row.visible = not _chat_session_allowed_tools.is_empty()
+		_session_allow_label.text = ChatSessionAllowModel.summary_text(_chat_session_allowed_tools)
+		_session_allow_label.tooltip_text = ChatSessionAllowModel.summary_tooltip(_chat_session_allowed_tools)
+
+
+func _forget_session_allowed_tools() -> void:
+	if not _chat_socket_ready():
+		_append_chat_system("Connect to the Codex Host to forget allowed tools.")
+		return
+	_send_chat_json(ChatSessionAllowModel.CLEAR_METHOD, {})
+
+
+## approval.auto_approved: one muted line per turn, updated in place while it is
+## still the latest transcript line.
+func _record_auto_approved(params: Dictionary) -> void:
+	if _chat_transcript_view == null:
+		_setup_chat_transcript_view()
+	var still_last := _auto_approved_body != null and is_instance_valid(_auto_approved_body) and _chat_transcript_view.is_last_message(_auto_approved_body)
+	var result := ChatSessionAllowModel.coalesce(_auto_approved_state, params, still_last)
+	_auto_approved_state = result.get("state", {})
+	if bool(result.get("new_line", true)):
+		_auto_approved_body = _chat_transcript_view.append_status_row(str(result.get("text", "")))
+	else:
+		_chat_transcript_view.set_bubble_text(_auto_approved_body, str(result.get("text", "")))
+	var tool := str(params.get("tool", ""))
+	if ChatSessionAllowModel.valid_tool_name(tool) and not _chat_session_allowed_tools.has(tool):
+		_chat_session_allowed_tools.append(tool)
+		_set_session_allowed_tools(_chat_session_allowed_tools.duplicate())
+
+
 func _update_background_status_label(params: Dictionary) -> void:
 	if _team_status_label == null:
 		return
@@ -2098,7 +2876,9 @@ func _clear_chat_approval(message: String) -> void:
 
 func _respond_to_chat_approval(decision: String) -> void:
 	var note := ""
-	if _chat_approval_note != null:
+	if _approval_popup != null and _approval_popup.approval_id != "" and _approval_popup.approval_id == str(_active_chat_approval.get("approval_id", "")):
+		note = _approval_popup.note_edit.text
+	elif _chat_approval_note != null:
 		note = _chat_approval_note.text
 
 	_apply_chat_approval_effects(ChatApprovalModel.response_effect_plan(_active_chat_approval, decision, note, _chat_socket_ready()).get("effects", []) as Array)
@@ -2112,6 +2892,7 @@ func _apply_chat_approval_effects(effects: Array) -> void:
 		match str(effect_dict.get("action", "")):
 			"set_active_approval":
 				_active_chat_approval = effect_dict.get("value", {}) as Dictionary
+				_sync_approval_popup()
 			"show_panel":
 				if _chat_approval_panel != null:
 					_chat_approval_panel.visible = bool(effect_dict.get("visible", true))
@@ -2120,12 +2901,15 @@ func _apply_chat_approval_effects(effects: Array) -> void:
 						if _chat_bottom_spacer != null and _chat_bottom_spacer.get_parent() == _chat_message_list:
 							target_index = max(_chat_message_list.get_child_count() - 2, 0)
 						_chat_message_list.move_child(_chat_approval_panel, target_index)
+				_present_approval_review()
 			"set_panel_visible":
 				if _chat_approval_panel != null:
 					_chat_approval_panel.visible = bool(effect_dict.get("visible", false))
 			"set_title":
 				if _chat_approval_title != null:
-					_chat_approval_title.text = str(effect_dict.get("text", ""))
+					var bar_text := ChatApprovalReviewModel.bar_text(_active_chat_approval) if not _active_chat_approval.is_empty() else str(effect_dict.get("text", ""))
+					_chat_approval_title.text = "⚠ " + bar_text
+					_chat_approval_title.tooltip_text = bar_text
 			"set_body":
 				if _chat_approval_body != null:
 					_chat_approval_body.text = str(effect_dict.get("text", ""))
@@ -2155,6 +2939,8 @@ func _apply_chat_approval_effects(effects: Array) -> void:
 func _send_chat_json(method: String, params: Dictionary) -> void:
 	if _chat_socket == null or _chat_socket.get_ready_state() != WebSocketPeer.STATE_OPEN:
 		return
+	if not _host_paired and method not in ["host.pair", "host.pair_complete"]:
+		return
 	_chat_request_id += 1
 	_chat_request_methods[_chat_request_id] = method
 	var err := _chat_socket.send_text(ChatSocketController.rpc_request_text(_chat_request_id, method, params))
@@ -2165,6 +2951,8 @@ func _send_chat_json(method: String, params: Dictionary) -> void:
 
 func _send_chat_notification(method: String, params: Dictionary) -> void:
 	if _chat_socket == null or _chat_socket.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		return
+	if not _host_paired:
 		return
 	var err := _chat_socket.send_text(ChatSocketController.rpc_notification_text(method, params))
 	_apply_chat_socket_send_effects(ChatSocketController.notification_send_result_effect_plan(err).get("effects", []) as Array)
@@ -2654,6 +3442,38 @@ func _request_runtime_models() -> void:
 func _update_runtime_model_options(data: Dictionary) -> void:
 	var plan := ChatRuntimeOptionsModel.update_model_options_effect_plan(data, _chat_model_options, _chat_reasoning_efforts)
 	_apply_runtime_model_options_effects(plan.get("effects", []) as Array)
+	if bool(plan.get("ok", false)):
+		_apply_model_preference(str(data.get("defaultModel", "")))
+
+
+## Restores the remembered model/effort when the inventory arrives. Selection
+## here is programmatic and never saved.
+func _apply_model_preference(default_model: String) -> void:
+	if _chat_model_option == null or _chat_reasoning_option == null:
+		return
+	_chat_effective_default_model = ChatModelPreferenceModel.effective_default_model(_chat_model_options, default_model)
+	var selection := ChatModelPreferenceModel.initial_selection(
+		_chat_model_options,
+		default_model,
+		_model_preference.has_saved_model(),
+		_model_preference.saved_model(),
+		_model_preference.saved_effort(),
+		_chat_reasoning_efforts
+	)
+	var model := str(selection.get("model", ""))
+	var model_index := 0 if model == "" else ChatRuntimeOptionsModel.selected_index_for_model_metadata(_option_metadata_items(_chat_model_option), model)
+	if model_index >= 0:
+		_chat_model_option.select(model_index)
+	_apply_runtime_model_options_effects(_chat_model_selection_effects())
+	var effort := str(selection.get("effort", ""))
+	var effort_index := 0 if effort == "" else ChatRuntimeOptionsModel.selected_index_for_reasoning_metadata(_option_metadata_items(_chat_reasoning_option), effort)
+	if effort_index >= 0:
+		_chat_reasoning_option.select(effort_index)
+	var notice := str(selection.get("notice", ""))
+	if notice != "" and not _model_preference_notices.has(notice):
+		_model_preference_notices[notice] = true
+		_append_chat_system(notice)
+	_update_chat_ui()
 
 
 func _apply_runtime_model_options_effects(effects: Array) -> void:
@@ -2781,6 +3601,7 @@ func _chat_readiness_tooltip() -> String:
 
 
 func _update_chat_ui() -> void:
+	_apply_addon_update_view()
 	var status_context := _chat_status_context()
 	var ui_context := ChatControlStateModel.ui_context({
 		"chat_enabled": _permission_enabled("allow_codex_chat"),
@@ -2806,7 +3627,10 @@ func _update_chat_ui() -> void:
 		if _chat_status_dot != null:
 			var dot_color: Color = status.get("color", ChatStatusModel.COLOR_IDLE)
 			_chat_status_dot.color = dot_color
-		_chat_status_label.tooltip_text = str(status_context.get("status_tooltip", ""))
+		var status_tooltip := str(status_context.get("status_tooltip", ""))
+		_chat_status_label.tooltip_text = _chat_status_label.text + ("\n" + status_tooltip if status_tooltip != "" else "")
+		if not _chat_session_allowed_tools.is_empty():
+			_chat_status_label.tooltip_text += "\n" + ChatSessionAllowModel.summary_text(_chat_session_allowed_tools)
 	if _chat_readiness_label != null:
 		_chat_readiness_label.text = str(status_context.get("readiness_label", ""))
 		_chat_readiness_label.tooltip_text = str(status_context.get("readiness_tooltip", ""))
@@ -2844,6 +3668,8 @@ func _update_chat_ui() -> void:
 	_update_pending_annotation_ui()
 	if _chat_cancel_button != null:
 		ChatPanelView.apply_button_state(_chat_cancel_button, controls.get("cancel", {}))
+		# Stop only appears while a turn is running (next to the working timer).
+		_chat_cancel_button.visible = foreground_busy or not _chat_cancel_button.disabled
 	if _chat_enable_tools_button != null:
 		ChatPanelView.apply_button_state(_chat_enable_tools_button, controls.get("enable_tools", {}))
 	if _chat_trust_button != null:
@@ -2854,19 +3680,47 @@ func _update_chat_ui() -> void:
 		ChatPanelView.apply_button_state(_team_cancel_button, controls.get("team_cancel", {}))
 	if _chat_approve_button != null:
 		ChatPanelView.apply_button_state(_chat_approve_button, controls.get("approve", {}))
-	if _chat_approve_session_button != null:
-		ChatPanelView.apply_button_state(_chat_approve_session_button, controls.get("approve_session", {}))
 	if _chat_reject_button != null:
 		ChatPanelView.apply_button_state(_chat_reject_button, controls.get("reject", {}))
+	# Session approval and Revise are in the review popup; the dock bar keeps
+	# only Review + quick Approve/Reject.
+	if _chat_approve_session_button != null:
+		ChatPanelView.apply_button_state(_chat_approve_session_button, controls.get("approve_session", {}))
+		_chat_approve_session_button.visible = _approval_popup == null and _chat_approve_session_button.visible
 	if _chat_revise_button != null:
 		ChatPanelView.apply_button_state(_chat_revise_button, controls.get("revise", {}))
+		_chat_revise_button.visible = _approval_popup == null
+	if _chat_allow_session_button != null:
+		ChatPanelView.apply_button_state(_chat_allow_session_button, controls.get("allow_session_tool", {}))
+	if _chat_model_badge != null:
+		var default_label := ChatModelPreferenceModel.model_label(ChatModelPreferenceModel.find_model(_chat_model_options, _chat_effective_default_model), _chat_effective_default_model)
+		_chat_model_badge.text = ChatModelPreferenceModel.badge_text(_selected_chat_model_data(), default_label if _chat_effective_default_model != "" else "", _selected_chat_reasoning())
+		_chat_model_badge.tooltip_text = "Model for the next message: " + _chat_model_badge.text + ".\nClick to change it (Advanced). Your last choice is remembered for this editor user."
+	if _approval_popup != null:
+		_approval_popup.apply_button_states(controls)
 
 
 func _poll_requests() -> void:
-	_ensure_bridge_dirs()
+	# Startup and artifact writers create these directories. Rechecking every
+	# directory on every 250 ms poll is expensive on Windows; repair only when
+	# transport directories are missing. The physical path guards below still
+	# run before reading requests or writing the heartbeat.
+	if not DirAccess.dir_exists_absolute(_requests_dir_abs) or not DirAccess.dir_exists_absolute(_responses_dir_abs):
+		_ensure_bridge_dirs()
+	var requests_guard := _validate_bridge_path(_requests_dir_abs, false)
+	var responses_guard := _validate_bridge_path(_responses_dir_abs, false)
+	if not bool(requests_guard.get("ok", false)) or not bool(responses_guard.get("ok", false)):
+		_log_event("request_transport_path_rejected", {"requests": requests_guard, "responses": responses_guard})
+		return
+	if not bool(_ensure_safe_bridge_directory(_journal_dir_abs).get("ok", false)):
+		_log_event("request_journal_path_rejected", {"path": _journal_dir_abs})
+		return
 	_write_heartbeat()
 
-	var request_files := _list_files_with_extension(_requests_dir_abs, ".json")
+	var request_files := _list_files_with_extension(_requests_dir_abs, ".json", MAX_REQUEST_QUEUE_FILES + 1)
+	if request_files.size() > MAX_REQUEST_QUEUE_FILES:
+		request_files.resize(MAX_REQUEST_QUEUE_FILES)
+		_log_event("request_queue_limited", {"max_files": MAX_REQUEST_QUEUE_FILES})
 	request_files.sort()
 
 	var handled := 0
@@ -2876,6 +3730,7 @@ func _poll_requests() -> void:
 
 		var response_path := _responses_dir_abs.path_join(str(file_name))
 		if FileAccess.file_exists(response_path):
+			DirAccess.remove_absolute(_requests_dir_abs.path_join(str(file_name)))
 			continue
 		if _async_editor_requests_in_flight.has(str(file_name)):
 			continue
@@ -2895,7 +3750,7 @@ func _poll_requests() -> void:
 		else:
 			response = _response_payload(str(file_name).get_basename(), "unknown", "error", {}, read_result.get("error", {}), str(file_name))
 
-		_write_json_file(response_path, response)
+		_write_response_atomic(response_path, response)
 		handled += 1
 
 	_update_ui()
@@ -2916,6 +3771,11 @@ func _handle_async_editor_control_request(file_name: String, request: Dictionary
 	var identity := BridgeRequestModel.request_identity(file_name.get_basename(), request)
 	var request_id := str(identity.get("request_id", file_name.get_basename()))
 	var request_type := str(identity.get("request_type", "editor_control"))
+	var claim := _claim_request(file_name.get_basename(), request, file_name)
+	if str(claim.get("state", "")) != "claimed":
+		_write_response_atomic(response_path, _journal_response(request_id, request_type, file_name, claim))
+		_async_editor_requests_in_flight.erase(file_name)
+		return
 	var payload := BridgeRequestModel.request_payload(request)
 	var started_msec := Time.get_ticks_msec()
 	var result: Dictionary
@@ -2925,12 +3785,73 @@ func _handle_async_editor_control_request(file_name: String, request: Dictionary
 	else:
 		result = await _multi_view_capture.capture_multi_view_async(params_value as Dictionary)
 	var final_result := _editor_control.finalize_action_result(request_id, "capture_multi_view", result, started_msec)
-	_write_json_file(response_path, _response_from_request_result(request_id, request_type, final_result, file_name))
+	var response := _response_from_request_result(request_id, request_type, final_result, file_name)
+	var completion := _request_journal.complete(request_id, response)
+	_write_response_atomic(response_path, _journal_response(request_id, request_type, file_name, completion))
 	_async_editor_requests_in_flight.erase(file_name)
 	_update_ui()
 
 
 func _handle_request(fallback_id: String, request: Dictionary, request_file_name: String) -> Dictionary:
+	var identity := BridgeRequestModel.request_identity(fallback_id, request)
+	var request_id := str(identity.get("request_id", fallback_id))
+	var request_type := str(identity.get("request_type", ""))
+	var claim := _claim_request(fallback_id, request, request_file_name)
+	if str(claim.get("state", "")) != "claimed":
+		return _journal_response(request_id, request_type, request_file_name, claim)
+	var response := _dispatch_request(fallback_id, request, request_file_name)
+	var completion := _request_journal.complete(request_id, response)
+	return _journal_response(request_id, request_type, request_file_name, completion)
+
+
+func _claim_request(fallback_id: String, request: Dictionary, request_source: String) -> Dictionary:
+	if request_source != "" and request_source != "websocket_rpc" and request_source.ends_with(".json") and fallback_id != str(request.get("request_id", "")):
+		return {"ok": false, "error": _error_payload("request_id_mismatch", "The request filename and request_id differ.")}
+	if request_source == "websocket_rpc" and fallback_id != str(request.get("request_id", "")):
+		return {"ok": false, "error": _error_payload("request_id_mismatch", "The RPC request_id and body request_id differ.")}
+	if JSON.stringify(request).to_utf8_buffer().size() > MAX_REQUEST_BYTES:
+		return {"ok": false, "error": _error_payload("request_too_large", "The Bridge request is too large.")}
+	var limits := BridgeRequestLimits.validate_json_limits(request, 0, {"nodes": 0})
+	if not bool(limits.get("ok", false)):
+		return limits
+	if not bool(_ensure_safe_bridge_directory(_journal_dir_abs).get("ok", false)):
+		return {"ok": false, "error": _error_payload("journal_unavailable", "The request journal is unavailable.")}
+	return _request_journal.begin(request)
+
+
+func _journal_response(request_id: String, request_type: String, request_source: String, journal_result: Dictionary) -> Dictionary:
+	if bool(journal_result.get("ok", false)) and typeof(journal_result.get("response")) == TYPE_DICTIONARY:
+		return journal_result.get("response", {}) as Dictionary
+	var error: Dictionary = journal_result.get("error", _error_payload("outcome_unknown", "The request result is unknown; the action will not be retried."))
+	return _response_payload(request_id, request_type, "error", {}, error, request_source)
+
+
+func _write_response_atomic(path: String, response: Dictionary) -> Dictionary:
+	var temporary := path + "." + str(Time.get_ticks_usec()) + ".tmp"
+	var guard := _validate_bridge_path(temporary, true)
+	if not bool(guard.get("ok", false)):
+		return {"ok": false, "error": guard.get("error", {})}
+	var file := FileAccess.open(temporary, FileAccess.WRITE)
+	if file == null:
+		return {"ok": false, "error": _error_payload("response_write_failed", "Could not open response staging file.")}
+	file.store_string(JSON.stringify(response))
+	file.flush()
+	var write_ok := file.get_error() == OK
+	file.close()
+	if not write_ok:
+		DirAccess.remove_absolute(temporary)
+		return {"ok": false, "error": _error_payload("response_write_failed", "Could not flush response staging file.")}
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(temporary)
+		return {"ok": false, "error": _error_payload("response_exists", "Response already exists.")}
+	var rename_error := DirAccess.rename_absolute(temporary, path)
+	if rename_error != OK:
+		DirAccess.remove_absolute(temporary)
+		return {"ok": false, "error": _error_payload("response_write_failed", "Could not publish the response file.")}
+	return {"ok": true}
+
+
+func _dispatch_request(fallback_id: String, request: Dictionary, request_file_name: String) -> Dictionary:
 	var identity := BridgeRequestModel.request_identity(fallback_id, request)
 	var request_id := str(identity.get("request_id", fallback_id))
 	var request_type := str(identity.get("request_type", ""))
@@ -2986,15 +3907,10 @@ func _handle_request(fallback_id: String, request: Dictionary, request_file_name
 			return _response_from_request_result(request_id, request_type, run_result, request_file_name)
 
 		"fix_selected_node":
-			if not _permission_enabled("allow_fix_selected_node"):
-				return _response_payload(request_id, request_type, "error", {}, _error_payload(
-					"permission_denied",
-					"Fix selected node permission is disabled in the Codex Bridge dock."
-				), request_file_name)
-			var fix_result := _fix_selected_node_request(payload)
-			if fix_result.get("ok", false):
-				_write_context_snapshot("fix_selected_node:" + request_id)
-			return _response_from_request_result(request_id, request_type, fix_result, request_file_name)
+			return _response_payload(request_id, request_type, "error", {}, _error_payload(
+				"trusted_node_fix_approval_unavailable",
+				"Direct selected-node fixes are disabled until a trusted one-use human approval receipt is bound to the exact selected-node state and proposed property change."
+			), request_file_name)
 
 		"editor_control":
 			var editor_result := _editor_control_request(request_id, payload)
@@ -3042,9 +3958,11 @@ func _register_editor_control_handlers() -> void:
 	_editor_control.register_action("get_state", Callable(self, "_editor_control_get_state_request"))
 	_editor_control.register_action("focus_editor", Callable(self, "_focus_editor_request"))
 	_editor_control.register_action("focus_panel", Callable(_editor_panel_navigation, "focus_panel"))
+	_editor_control.register_action("viewport_navigate", Callable(_editor_viewport_navigation, "navigate"))
 	_editor_control.register_action("open_scene", Callable(self, "_editor_control_open_scene_request"))
 	_editor_control.register_action("select_node", Callable(self, "_editor_control_select_node_request"))
 	_editor_control.register_action("inspect_node", Callable(self, "_editor_control_inspect_node_request"))
+	_editor_control.register_action("get_inspector_context", Callable(_editor_inspector_context, "get_inspector_context"))
 	_editor_control.register_action("get_node_deep", Callable(self, "_get_node_deep_request"))
 	_editor_control.register_action("open_script", Callable(self, "_open_script_request"))
 	_editor_control.register_action("list_resources", Callable(_editor_resource_browser, "list_resources"))
@@ -3063,7 +3981,13 @@ func _register_editor_control_handlers() -> void:
 	_editor_control.register_action("preview_animation", Callable(_editor_animation, "preview_animation"))
 	_editor_control.register_action("stop_animation_preview", Callable(_editor_animation, "stop_animation_preview"))
 	_editor_control.register_action("get_diagnostics", Callable(_editor_diagnostics, "get_diagnostics"))
+	_editor_control.register_action("get_spatial_bounds", Callable(_spatial_bounds, "get_spatial_bounds"))
+	_editor_control.register_action("spatial_query", Callable(_spatial_bounds, "spatial_query"))
+	_editor_control.register_action("placement_check", Callable(_spatial_bounds, "placement_check"))
+	_editor_control.register_action("snap_to_ground", Callable(_spatial_bounds, "snap_to_ground"))
+	_editor_control.register_action("snap_to_grid", Callable(_spatial_bounds, "snap_to_grid"))
 	_editor_control.register_action("clear_diagnostics", Callable(_editor_diagnostics, "clear_diagnostics"))
+	_editor_control.register_action("undo_last_bridge_action", Callable(_editor_undo, "undo_last_bridge_action"))
 	_editor_control.register_action("set_node_transform", Callable(_editor_scene_mutation, "set_node_transform"))
 	_editor_control.register_action("set_node_properties", Callable(_editor_scene_mutation, "set_node_properties"))
 	_editor_control.register_action("save_scene", Callable(_editor_scene_save, "save_scene"))
@@ -3086,6 +4010,7 @@ func _register_editor_control_handlers() -> void:
 	_editor_control.register_action("notes_append", Callable(_editor_diagnostics, "notes_append"))
 	_editor_control.register_action("notes_clear", Callable(_editor_diagnostics, "notes_clear"))
 	_editor_control.register_action("stop_running_scene", Callable(self, "_stop_running_scene_request"))
+	_editor_control.register_action("emergency_stop", Callable(self, "_emergency_stop_request"))
 	_editor_control.register_action("capture_multi_view", Callable(_multi_view_capture, "capture_multi_view"))
 
 
@@ -3588,6 +4513,7 @@ func _run_current_scene_request() -> Dictionary:
 		}
 
 	EditorInterface.play_current_scene()
+	_bridge_owned_play_session = true
 	var data := {
 		"started": true,
 		"scene_file_path": scene_root.scene_file_path,
@@ -3609,6 +4535,7 @@ func _stop_running_scene_request(_params: Dictionary = {}) -> Dictionary:
 	var playing_scene := EditorInterface.get_playing_scene()
 	if was_playing:
 		EditorInterface.stop_playing_scene()
+	_bridge_owned_play_session = false
 	var data := {
 		"was_playing": was_playing,
 		"playing_scene": playing_scene,
@@ -3624,6 +4551,47 @@ func _stop_running_scene_request(_params: Dictionary = {}) -> Dictionary:
 		"ok": true,
 		"data": data,
 	}
+
+
+## Safety cleanup: stops only a play session Bridge started. It never saves,
+## never mutates the edited scene and never stops a user-started session.
+## This addon version holds no playtest input or session token (playtest input
+## is disabled), so there is no held input or token left to release.
+func _emergency_stop_request(params: Dictionary = {}) -> Dictionary:
+	var source := str(params.get("source", "emergency_stop")).strip_edges().left(64)
+	if source == "":
+		source = "emergency_stop"
+	var was_playing := EditorInterface.is_playing_scene()
+	var bridge_owned := _bridge_owned_play_session and was_playing
+	var data := {}
+	if bridge_owned:
+		data = (_stop_running_scene_request({"source": source}).get("data", {}) as Dictionary).duplicate()
+	else:
+		_bridge_owned_play_session = false
+		data = {
+			"was_playing": was_playing,
+			"playing_scene": EditorInterface.get_playing_scene(),
+			"stopped": false,
+			"requested_at": _iso_now(),
+		}
+	data["action"] = "emergency_stop"
+	data["emergency_stop"] = true
+	data["source"] = source
+	data["bridge_owned_play_session"] = bridge_owned
+	data["playtest_input_active"] = false
+	data["held_actions_released"] = true
+	data["session_closed"] = true
+	data["playtest_cleanup_ok"] = true
+	data["runtime_input_blocked_after_stop"] = true
+	data["scene_mutated"] = false
+	if bridge_owned:
+		data["guidance"] = "Emergency stop stopped the Bridge-owned play session. Playtest input is disabled in this addon version, so no held input or session token remained."
+	elif was_playing:
+		data["guidance"] = "A play session is running but was not started by Godot Codex Bridge, so emergency stop left it running. Stop it in the editor or with stop_running_scene."
+	else:
+		data["guidance"] = "No Godot play session was active; Bridge runtime work is idle."
+	_log_event("emergency_stop_requested", data)
+	return _ok(data)
 
 
 func _open_scene_request(payload: Dictionary) -> Dictionary:
@@ -3754,7 +4722,7 @@ func _get_codex_chat_layout_status_request() -> Dictionary:
 			"input_scroll_fit_content_height": _chat_input.scroll_fit_content_height,
 			"composer_expanded": _chat_composer_expanded,
 			"composer_toggle_visible": _chat_composer_toggle_button != null and _chat_composer_toggle_button.is_visible_in_tree(),
-			"composer_toggle_text": _chat_composer_toggle_button.text if _chat_composer_toggle_button != null else "",
+			"composer_toggle_text": DockStyle.button_label(_chat_composer_toggle_button),
 			"eye_button_visible": _chat_eye_button != null and _chat_eye_button.is_visible_in_tree(),
 			"approval_visible": _chat_approval_panel != null and _chat_approval_panel.visible,
 			"panel_minimum_size": _chat_dock.custom_minimum_size,
@@ -3852,6 +4820,9 @@ func _get_codex_chat_layout_status_request() -> Dictionary:
 			"usable_rect": usable_rect,
 		}
 	)
+	status_data["host_pair_dialog_visible"] = _host_pair_dialog != null and _host_pair_dialog.visible
+	status_data["host_pair_input_masked"] = _host_pair_input != null and _host_pair_input.secret
+	status_data["host_paired"] = _host_paired
 	return {
 		"ok": true,
 		"data": status_data,
@@ -4338,6 +5309,9 @@ func _capture_codex_chat_visual_evidence_request(payload: Dictionary) -> Diction
 	var reason := str(payload.get("reason", "codex_chat_visual_evidence")).strip_edges()
 	var file_name := "codex_chat_" + _safe_identifier(reason) + "_" + _file_timestamp() + ".png"
 	var absolute_path := _screenshots_dir_abs.path_join(file_name)
+	var path_guard := _validate_bridge_path(absolute_path, true)
+	if not bool(path_guard.get("ok", false)):
+		return {"ok": false, "error": path_guard.get("error", _error_payload("chat_visual_path_rejected", "Visual evidence path is unsafe."))}
 	if not _permission_enabled("allow_screenshots"):
 		return _err("permission_denied", "Screenshot permission was revoked before the visual evidence artifact was written.")
 	var save_error := image.save_png(absolute_path)
@@ -4492,7 +5466,7 @@ func _chat_request_context() -> Dictionary:
 
 
 func _chat_socket_ready() -> bool:
-	return _chat_socket != null and _chat_socket.get_ready_state() == WebSocketPeer.STATE_OPEN
+	return _host_paired and _chat_socket != null and _chat_socket.get_ready_state() == WebSocketPeer.STATE_OPEN
 
 
 func _set_chat_attachment_flags(value: Variant) -> void:
@@ -4559,100 +5533,6 @@ func _chat_request_state() -> Dictionary:
 		"trust_mode": _chat_trust_mode,
 		"active_project_root": _chat_active_project_root,
 	})
-
-
-func _fix_selected_node_request(payload: Dictionary) -> Dictionary:
-	if str(payload.get("approval_token", "")) != FIX_SELECTED_NODE_APPROVAL_TOKEN:
-		return {
-			"ok": false,
-			"error": _error_payload("approval_token_required", "Set approval_token to " + FIX_SELECTED_NODE_APPROVAL_TOKEN + " after reviewing diagnostics."),
-		}
-
-	var selected := EditorInterface.get_selection().get_selected_nodes()
-	if selected.is_empty():
-		return {
-			"ok": false,
-			"error": _error_payload("no_selected_node", "Select one node in the Godot editor before requesting a fix."),
-		}
-
-	var node := selected[0]
-	var fix_code := str(payload.get("fix_code", ""))
-	var property_name := ""
-	var new_value: Variant = null
-
-	match fix_code:
-		"unhide_node":
-			if node is Node3D:
-				property_name = "visible"
-				new_value = true
-		"make_camera_current":
-			if node is Camera3D:
-				property_name = "current"
-				new_value = true
-		"enable_collision_shape":
-			if node is CollisionShape3D:
-				property_name = "disabled"
-				new_value = false
-		"enable_navigation_region":
-			if node is NavigationRegion3D:
-				property_name = "enabled"
-				new_value = true
-		"set_light_energy_default":
-			if node is Light3D:
-				property_name = "light_energy"
-				new_value = 1.0
-		"enable_light_shadows":
-			if node is Light3D:
-				property_name = "shadow_enabled"
-				new_value = true
-		_:
-			return {
-				"ok": false,
-				"error": _error_payload("unsupported_fix_code", "Unsupported selected node fix code: " + fix_code),
-			}
-
-	if property_name == "":
-		return {
-			"ok": false,
-			"error": _error_payload("fix_not_applicable", "Fix code is not applicable to selected node type: " + node.get_class()),
-		}
-
-	var old_value: Variant = node.get(property_name)
-	if old_value == new_value:
-		return {
-			"ok": true,
-			"data": {
-				"changed": false,
-				"fix_code": fix_code,
-				"node": _node_ref_payload(node, EditorInterface.get_edited_scene_root()),
-				"property": property_name,
-				"value": _variant_to_json_value(new_value),
-			},
-		}
-
-	var undo := get_undo_redo()
-	undo.create_action("Godot Codex Bridge: " + fix_code)
-	undo.add_do_property(node, property_name, new_value)
-	undo.add_undo_property(node, property_name, old_value)
-	undo.commit_action()
-	_log_event("selected_node_fixed", {
-		"fix_code": fix_code,
-		"node_path": str(node.get_path()),
-		"property": property_name,
-	})
-
-	return {
-		"ok": true,
-		"data": {
-			"changed": true,
-			"fix_code": fix_code,
-			"node": _node_ref_payload(node, EditorInterface.get_edited_scene_root()),
-			"property": property_name,
-			"old_value": _variant_to_json_value(old_value),
-			"new_value": _variant_to_json_value(new_value),
-			"undo_redo_action": true,
-		},
-	}
 
 
 func _sanitize_node_name(value: String, fallback: String) -> String:
@@ -4991,7 +5871,7 @@ func _load_host_config() -> Dictionary:
 
 	var read_result := _read_json_file(_host_config_abs)
 	if not read_result.get("ok", false):
-		_apply_host_config_state(ChatHostConfigModel.invalid_state(DEFAULT_CODEX_HOST_PORT))
+		_apply_host_config_state(ChatHostConfigModel.invalid_state(DEFAULT_CODEX_HOST_PORT, "Host connection config is not valid JSON. Refresh the addon install; no default port was used."))
 		_log_event("host_config_invalid", {
 			"path": HOST_CONFIG_PATH,
 			"error": read_result.get("error", {}),
@@ -5027,7 +5907,15 @@ func _read_json_file(path: String) -> Dictionary:
 			"error": _error_payload("file_read_failed", "Failed to read JSON file: " + path + " (" + error_string(FileAccess.get_open_error()) + ")"),
 		}
 
-	var text := file.get_as_text()
+	var text := ""
+	if path.begins_with(_requests_dir_abs):
+		var bytes := file.get_buffer(MAX_REQUEST_BYTES + 1)
+		var bounded_request := BridgeRequestLimits.parse_bounded_request(bytes)
+		if not bool(bounded_request.get("ok", false)):
+			return bounded_request
+		return bounded_request
+	else:
+		text = file.get_as_text()
 	var parsed: Variant = JSON.parse_string(text)
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return {
@@ -5042,6 +5930,12 @@ func _read_json_file(path: String) -> Dictionary:
 
 
 func _write_json_file(path: String, data: Dictionary) -> Dictionary:
+	var path_guard := _validate_bridge_path(path, true)
+	if not bool(path_guard.get("ok", false)):
+		return {
+			"ok": false,
+			"error": path_guard.get("error", _error_payload("file_path_rejected", "Bridge JSON path is unsafe: " + path)),
+		}
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		return {
@@ -5161,7 +6055,7 @@ func _string_array(values: Array) -> Array:
 	return strings
 
 
-func _list_files_with_extension(dir_path: String, extension: String) -> Array:
+func _list_files_with_extension(dir_path: String, extension: String, max_results: int = 0) -> Array:
 	var files: Array = []
 	var dir := DirAccess.open(dir_path)
 	if dir == null:
@@ -5172,6 +6066,8 @@ func _list_files_with_extension(dir_path: String, extension: String) -> Array:
 	while file_name != "":
 		if not dir.current_is_dir() and file_name.ends_with(extension):
 			files.append(file_name)
+			if max_results > 0 and files.size() >= max_results:
+				break
 		file_name = dir.get_next()
 	dir.list_dir_end()
 

@@ -3,12 +3,28 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
 
+import {
+  assertPhysicalPathSync,
+  ensureDirectoryInsideRootSync,
+  isInside,
+  PhysicalPathError,
+  readFileInsideRootSync,
+  writeFileInsideRootSync,
+} from "./physicalPath.js";
 import type { JsonObject, ToolEnvelope } from "./types.js";
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MAX_PNG_BYTES = 16 * 1024 * 1024;
+const MAX_PNG_DIMENSION = 8_192;
+const MAX_PNG_PIXELS = 16_777_216;
+const MAX_PNG_CHUNKS = 4_096;
+const MAX_PNG_CHUNK_BYTES = 8 * 1024 * 1024;
+const MAX_PNG_IDAT_BYTES = 16 * 1024 * 1024;
+const MAX_PNG_INFLATED_BYTES = 80 * 1024 * 1024;
 
 interface ValidatedPng {
   path: string;
+  artifactRoot: string;
 }
 
 interface PngMetadata extends JsonObject {
@@ -41,10 +57,28 @@ export async function createVisualBaseline(
 }
 
 export async function compareVisualRegression(
+  _projectRoot: string,
+  _bridgeDir: string,
+  _options: { currentScreenshotPath: string; baselineName?: string; baselinePath?: string },
+): Promise<ToolEnvelope> {
+  return {
+    status: "bridge_unavailable",
+    compared: false,
+    mitigation: "operation_disabled",
+    error: {
+      code: "trusted_visual_input_provenance_unavailable",
+      message: "Visual comparison is disabled until both inputs have Bridge-owned screenshot provenance and live screenshot permission can be verified.",
+    },
+  };
+}
+
+async function compareVisualRegressionTrustedArtifacts(
+  projectRoot: string,
   bridgeDir: string,
   options: { currentScreenshotPath: string; baselineName?: string; baselinePath?: string },
 ): Promise<ToolEnvelope> {
-  const current = await validatePngPath(options.currentScreenshotPath);
+  const artifactRoot = path.join(bridgeDir, "artifacts");
+  const current = await validatePngPath(options.currentScreenshotPath, projectRoot, artifactRoot);
   if (!isValidatedPng(current)) {
     return current;
   }
@@ -52,7 +86,7 @@ export async function compareVisualRegression(
   const baselinePath = options.baselinePath ?? (options.baselineName
     ? path.join(bridgeDir, "artifacts", "visual_regression", "baselines", safeName(options.baselineName), "baseline.png")
     : "");
-  const baseline = await validatePngPath(baselinePath);
+  const baseline = await validatePngPath(baselinePath, projectRoot, artifactRoot);
   if (!isValidatedPng(baseline)) {
     return {
       status: "invalid_request",
@@ -64,13 +98,13 @@ export async function compareVisualRegression(
     };
   }
 
-  const baselineMetadata = await pngMetadata(baseline.path);
-  const currentMetadata = await pngMetadata(current.path);
+  const baselineMetadata = await pngMetadata(baseline.artifactRoot, baseline.path);
+  const currentMetadata = await pngMetadata(current.artifactRoot, current.path);
   const exactMatch = baselineMetadata.sha256 === currentMetadata.sha256;
   const dimensionsMatch =
     baselineMetadata.width === currentMetadata.width &&
     baselineMetadata.height === currentMetadata.height;
-  const pixelDiff = await comparePngPixels(baseline.path, current.path, dimensionsMatch);
+  const pixelDiff = await comparePngPixels(baseline, current, dimensionsMatch);
 
   const result = {
     status: "ok" as const,
@@ -87,13 +121,17 @@ export async function compareVisualRegression(
   };
 
   const compareRoot = path.join(bridgeDir, "artifacts", "visual_regression", "comparisons");
-  await fs.mkdir(compareRoot, { recursive: true });
+  ensureDirectoryInsideRootSync(projectRoot, compareRoot);
   const resultPath = path.join(compareRoot, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-  await fs.writeFile(resultPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  writeFileInsideRootSync(projectRoot, resultPath, `${JSON.stringify(result, null, 2)}\n`);
   return { ...result, result_path: resultPath };
 }
 
-async function validatePngPath(filePath: string): Promise<ValidatedPng | ToolEnvelope> {
+export const visualRegressionTestSupport = {
+  compareTrustedArtifacts: compareVisualRegressionTrustedArtifacts,
+};
+
+async function validatePngPath(filePath: string, projectRoot: string, artifactRoot: string): Promise<ValidatedPng | ToolEnvelope> {
   if (!filePath || typeof filePath !== "string") {
     return invalid("path_required", "A PNG path is required.");
   }
@@ -101,7 +139,19 @@ async function validatePngPath(filePath: string): Promise<ValidatedPng | ToolEnv
     return invalid("png_required", "Visual regression artifacts must be PNG files.");
   }
   try {
-    const handle = await fs.open(filePath, "r");
+    const resolvedPath = path.resolve(filePath);
+    if (!isInside(artifactRoot, resolvedPath)) {
+      return invalid("path_boundary_rejected", "Visual regression input must be inside the Bridge artifact directory.");
+    }
+    assertPhysicalPathSync(projectRoot, resolvedPath, { requireFile: true });
+    const stat = await fs.stat(resolvedPath);
+    if (stat.nlink > 1) {
+      return invalid("hardlink_rejected", "Visual regression input cannot be a hard-linked file.");
+    }
+    if (stat.size > MAX_PNG_BYTES) {
+      return invalid("png_too_large", `PNG files are limited to ${MAX_PNG_BYTES} bytes.`);
+    }
+    const handle = await fs.open(resolvedPath, "r");
     try {
       const signature = Buffer.alloc(PNG_SIGNATURE.length);
       await handle.read(signature, 0, PNG_SIGNATURE.length, 0);
@@ -111,14 +161,17 @@ async function validatePngPath(filePath: string): Promise<ValidatedPng | ToolEnv
     } finally {
       await handle.close();
     }
-    return { path: path.resolve(filePath) };
-  } catch {
+    return { path: resolvedPath, artifactRoot: projectRoot };
+  } catch (error) {
+    if (error instanceof PhysicalPathError) {
+      return invalid(error.code, error.message);
+    }
     return invalid("png_not_found", "PNG file was not found.");
   }
 }
 
-async function pngMetadata(filePath: string): Promise<PngMetadata> {
-  const buffer = await fs.readFile(filePath);
+async function pngMetadata(artifactRoot: string, filePath: string): Promise<PngMetadata> {
+  const buffer = readFileInsideRootSync(artifactRoot, filePath);
   return {
     width: buffer.readUInt32BE(16),
     height: buffer.readUInt32BE(20),
@@ -127,7 +180,7 @@ async function pngMetadata(filePath: string): Promise<PngMetadata> {
   };
 }
 
-async function comparePngPixels(baselinePath: string, currentPath: string, dimensionsMatch: boolean): Promise<JsonObject> {
+async function comparePngPixels(baselineFile: ValidatedPng, currentFile: ValidatedPng, dimensionsMatch: boolean): Promise<JsonObject> {
   if (!dimensionsMatch) {
     return {
       status: "skipped",
@@ -136,8 +189,8 @@ async function comparePngPixels(baselinePath: string, currentPath: string, dimen
   }
 
   try {
-    const baseline = decodePng(await fs.readFile(baselinePath));
-    const current = decodePng(await fs.readFile(currentPath));
+    const baseline = decodePng(readFileInsideRootSync(baselineFile.artifactRoot, baselineFile.path));
+    const current = decodePng(readFileInsideRootSync(currentFile.artifactRoot, currentFile.path));
     if (baseline.width !== current.width || baseline.height !== current.height) {
       return {
         status: "skipped",
@@ -181,6 +234,9 @@ async function comparePngPixels(baselinePath: string, currentPath: string, dimen
 }
 
 function decodePng(buffer: Buffer): DecodedPng {
+  if (buffer.byteLength > MAX_PNG_BYTES) {
+    throw new Error(`PNG exceeds the ${MAX_PNG_BYTES}-byte decode limit.`);
+  }
   if (!buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
     throw new Error("PNG signature is invalid.");
   }
@@ -192,9 +248,18 @@ function decodePng(buffer: Buffer): DecodedPng {
   let colorType = 0;
   let palette: Buffer | null = null;
   const idatChunks: Buffer[] = [];
+  let chunkCount = 0;
+  let idatBytes = 0;
 
   while (offset + 12 <= buffer.length) {
+    chunkCount += 1;
+    if (chunkCount > MAX_PNG_CHUNKS) {
+      throw new Error("PNG contains too many chunks.");
+    }
     const length = buffer.readUInt32BE(offset);
+    if (length > MAX_PNG_CHUNK_BYTES) {
+      throw new Error("PNG chunk exceeds the configured size limit.");
+    }
     const type = buffer.toString("ascii", offset + 4, offset + 8);
     const dataStart = offset + 8;
     const dataEnd = dataStart + length;
@@ -204,6 +269,9 @@ function decodePng(buffer: Buffer): DecodedPng {
     const data = buffer.subarray(dataStart, dataEnd);
 
     if (type === "IHDR") {
+      if (length !== 13) {
+        throw new Error("PNG IHDR has an invalid length.");
+      }
       width = data.readUInt32BE(0);
       height = data.readUInt32BE(4);
       bitDepth = data[8];
@@ -217,6 +285,10 @@ function decodePng(buffer: Buffer): DecodedPng {
     } else if (type === "PLTE") {
       palette = data;
     } else if (type === "IDAT") {
+      idatBytes += length;
+      if (idatBytes > MAX_PNG_IDAT_BYTES) {
+        throw new Error("PNG compressed image data exceeds the configured limit.");
+      }
       idatChunks.push(data);
     } else if (type === "IEND") {
       break;
@@ -228,6 +300,9 @@ function decodePng(buffer: Buffer): DecodedPng {
   if (width <= 0 || height <= 0) {
     throw new Error("PNG IHDR is missing or invalid.");
   }
+  if (width > MAX_PNG_DIMENSION || height > MAX_PNG_DIMENSION || width * height > MAX_PNG_PIXELS) {
+    throw new Error("PNG dimensions exceed the configured pixel limits.");
+  }
   if (bitDepth !== 8) {
     throw new Error("Only 8-bit PNG images are supported for pixel diff.");
   }
@@ -235,8 +310,11 @@ function decodePng(buffer: Buffer): DecodedPng {
   const channelCount = channelsForColorType(colorType);
   const bytesPerPixel = channelCount;
   const scanlineLength = width * channelCount;
-  const inflated = inflateSync(Buffer.concat(idatChunks));
   const expectedLength = height * (1 + scanlineLength);
+  if (!Number.isSafeInteger(expectedLength) || expectedLength > MAX_PNG_INFLATED_BYTES) {
+    throw new Error("PNG inflated image data exceeds the configured limit.");
+  }
+  const inflated = inflateSync(Buffer.concat(idatChunks), { maxOutputLength: expectedLength });
   if (inflated.length < expectedLength) {
     throw new Error("PNG image data is shorter than expected.");
   }

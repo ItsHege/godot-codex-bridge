@@ -52,6 +52,34 @@ func _run() -> void:
 	var bad_ext := lifecycle.validate_scene_path("res://scene.txt")
 	_assert_eq(bad_ext.get("code"), "invalid_scene_extension", "bad scene extension rejected")
 
+	# Owner bookkeeping for delete/reparent: scene-owned descendants are
+	# recorded; nodes owned inside the subtree (instance internals) are not.
+	var scene := Node3D.new()
+	var parent := _owned(scene, scene, "Parent")
+	var grandchild_parent := _owned(parent, scene, "Instance")
+	var internal := Node3D.new()
+	internal.name = "Internal"
+	grandchild_parent.add_child(internal)
+	internal.owner = grandchild_parent
+	var leaf := _owned(internal, scene, "EditableLeaf")
+	var owned := EditorNodeLifecycle.externally_owned_nodes(parent)
+	var owned_nodes: Array = owned.map(func(entry: Dictionary) -> Node: return entry.get("node"))
+	_assert_eq(owned_nodes, [parent, grandchild_parent, leaf], "externally owned nodes in tree order")
+	_assert_false(owned_nodes.has(internal), "instance-internal node keeps its own owner")
+	var other := _owned(scene, scene, "Other")
+	_assert_eq(EditorNodeLifecycle.owner_after_reparent(scene, other, scene), scene, "scene owner survives reparent")
+	_assert_eq(EditorNodeLifecycle.owner_after_reparent(grandchild_parent, other, scene), scene, "non-ancestor owner falls back to scene root")
+	_assert_eq(EditorNodeLifecycle.owner_after_reparent(grandchild_parent, internal, scene), grandchild_parent, "ancestor owner kept")
+	scene.free()
+
+
+func _owned(parent: Node, owner: Node, node_name: String) -> Node:
+	var node := Node3D.new()
+	node.name = node_name
+	parent.add_child(node)
+	node.owner = owner
+	return node
+
 
 func _assert_eq(actual: Variant, expected: Variant, label: String) -> void:
 	if actual != expected:

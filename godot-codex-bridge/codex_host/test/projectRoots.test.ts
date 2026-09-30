@@ -21,6 +21,20 @@ test("resolveProject requires project.godot and creates host state dir", async (
   assert.equal(state.isDirectory(), true);
 });
 
+test("resolveProject skips a hard-linked AGENTS.md instead of failing attach", async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-host-agents-hardlink-"));
+  const root = path.join(base, "project");
+  await fs.mkdir(path.join(root, "docs"), { recursive: true });
+  await fs.writeFile(path.join(root, "project.godot"), "[application]\n", "utf8");
+  await fs.writeFile(path.join(root, "AGENTS.md"), "# Real\n", "utf8");
+  await fs.writeFile(path.join(base, "outside.md"), "# Outside\n", "utf8");
+  await fs.link(path.join(base, "outside.md"), path.join(root, "docs", "AGENTS.md"));
+
+  const summary = await resolveProject(root);
+
+  assert.deepEqual(summary.agentsFiles.map((file) => file.path), [path.join(root, "AGENTS.md")]);
+});
+
 test("resolveProject rejects wrong root", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-host-wrong-"));
   await assert.rejects(() => resolveProject(root), /wrong_root/);

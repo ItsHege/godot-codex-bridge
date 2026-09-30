@@ -264,6 +264,16 @@ static func addon_rpc_request_plan(params: Dictionary) -> Dictionary:
 		}
 	var request := request_value as Dictionary
 	var request_id := str(request.get("request_id", fallback_request_id))
+	if fallback_request_id != request_id:
+		return {
+			"ok": false,
+			"request_id": fallback_request_id,
+			"request_action": str(request.get("type", "unknown")),
+			"error": {
+				"code": "request_id_mismatch",
+				"message": "bridge.addon_request outer and body request IDs differ.",
+			},
+		}
 	if request_id == "":
 		request_id = "websocket_rpc"
 	return {

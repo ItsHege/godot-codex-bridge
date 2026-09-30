@@ -921,10 +921,11 @@ function registerTools(server: McpServer, config: ServerConfig): void {
     "godot.stop_animation_preview",
     {
       title: "Stop Godot Animation Preview",
-      description: "Stop an AnimationPlayer preview in the live editor without saving the scene.",
+      description: "Stop an AnimationPlayer preview in the live editor without saving the scene. Restores the pose from before the preview unless keepPose is true.",
       inputSchema: {
         nodePath: z.string().min(1).max(400),
         keepState: z.boolean().optional(),
+        keepPose: z.boolean().optional(),
         timeoutMs: z.number().int().min(250).max(30_000).optional(),
       },
     },
@@ -992,7 +993,7 @@ function registerTools(server: McpServer, config: ServerConfig): void {
     "godot.undo_last_bridge_action",
     {
       title: "Undo Last Godot Bridge Action",
-      description: "Undo the latest current-scene UndoRedo action only when it was created by Godot Codex Bridge. Does not save the scene.",
+      description: "Undo the latest Godot Codex Bridge action from this editor session (scene or global history) only when nothing newer happened in the editor; otherwise refuses with a reason. Does not save the scene.",
       inputSchema: {
         timeoutMs: z.number().int().min(250).max(30_000).optional(),
       },
@@ -1254,8 +1255,8 @@ function registerTools(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "godot.save_scene",
     {
-      title: "Save Current Godot Scene",
-      description: "Explicitly save the currently edited scene through Godot EditorInterface, then run a bounded Godot --headless --check-only parse check. Requires the Save scenes bridge permission.",
+      title: "Save Current Godot Scene (Disabled)",
+      description: "Fail-closed mitigation: direct Bridge scene saving is disabled until an exact, short-lived, single-use human approval receipt and rollback evidence are available. Save from the Godot editor UI.",
       inputSchema: {
         timeoutMs: z.number().int().min(250).max(30_000).optional(),
         postSaveCheckTimeoutMs: z.number().int().min(1_000).max(60_000).optional(),
@@ -1267,8 +1268,8 @@ function registerTools(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "godot.save_all_scenes",
     {
-      title: "Save All Open Godot Scenes",
-      description: "Explicitly save all open Godot editor scenes through Godot EditorInterface. Requires the Save scenes bridge permission.",
+      title: "Save All Open Godot Scenes (Disabled)",
+      description: "Fail-closed mitigation: direct save-all is disabled until exact, short-lived, single-use human approval receipts and rollback evidence cover every dirty scene. Save from the Godot editor UI.",
       inputSchema: {
         timeoutMs: z.number().int().min(250).max(30_000).optional(),
       },
@@ -1364,8 +1365,8 @@ function registerTools(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "godot.compare_visual_regression",
     {
-      title: "Compare Godot Visual Regression",
-      description: "Compare a current local PNG screenshot with a stored baseline by dimensions, byte size and SHA-256.",
+      title: "Compare Godot Visual Regression (Disabled)",
+      description: "Disabled until both images have trusted Bridge provenance and live screenshot permission is verified.",
       inputSchema: {
         currentScreenshotPath: z.string().min(1),
         baselineName: z.string().max(80).optional(),
@@ -1433,8 +1434,8 @@ function registerTools(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "godot.fix_selected_node",
     {
-      title: "Fix Selected Godot Node",
-      description: "Ask the live addon to apply a narrow undoable fix to the currently selected node after dock permission and approval token.",
+      title: "Fix Selected Godot Node (Disabled)",
+      description: "Disabled until a trusted one-use human approval receipt is bound to the exact selected node state and proposed property change.",
       inputSchema: {
         fixCode: z.enum([
           "unhide_node",
@@ -1444,7 +1445,6 @@ function registerTools(server: McpServer, config: ServerConfig): void {
           "set_light_energy_default",
           "enable_light_shadows",
         ]),
-        approvalToken: z.string().min(1),
         timeoutMs: z.number().int().min(250).max(30_000).optional(),
       },
     },
@@ -1557,7 +1557,7 @@ function registerTools(server: McpServer, config: ServerConfig): void {
     "godot.playtest_input",
     {
       title: "Send Godot Playtest Input",
-      description: "Send a bounded typed input batch to a bridge-owned running scene through the opt-in runtime probe. Requires the Playtest input bridge permission.",
+      description: "Temporarily disabled until a default-off, live-authorized addon action can bind input to a Bridge-owned runtime session.",
       inputSchema: {
         steps: z.array(z.object({
           type: z.enum(["action_press", "action_release", "axis", "key", "mouse_button"]),
@@ -1594,7 +1594,7 @@ function registerTools(server: McpServer, config: ServerConfig): void {
     "godot.run_playtest_scenario",
     {
       title: "Run Godot Playtest Scenario",
-      description: "Run a project-local scene through the live addon and execute a bounded playtest scenario contract. The addon must support the run_playtest_scenario editor-control action.",
+      description: "Temporarily disabled until the addon exposes a default-off, live-authorized production scenario action.",
       inputSchema: {
         scenePath: z.string().startsWith("res://"),
         steps: z.array(z.object({
@@ -1668,8 +1668,8 @@ function registerTools(server: McpServer, config: ServerConfig): void {
   server.registerTool(
     "godot.run_test_scene",
     {
-      title: "Run Godot Test Scene",
-      description: "Run a configured project-local test scene through the fixed Godot executable without shell access.",
+      title: "Run Godot Test Scene (Disabled)",
+      description: "Fail-closed mitigation: direct MCP scene execution is disabled until a live, default-off runtime authorization is available. Use the permission-gated Godot editor run workflow.",
       inputSchema: {
         scenePath: z.string().startsWith("res://").optional(),
         timeoutMs: z.number().int().min(1_000).max(60_000).optional(),

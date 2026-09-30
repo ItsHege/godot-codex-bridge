@@ -19,8 +19,6 @@ if ([string]::IsNullOrWhiteSpace($GodotExecutable)) {
     $GodotExecutable = $env:GODOT_BIN
   } elseif (-not [string]::IsNullOrWhiteSpace($env:GODOT_PATH) -and (Test-Path -LiteralPath $env:GODOT_PATH)) {
     $GodotExecutable = $env:GODOT_PATH
-  } elseif (Test-Path -LiteralPath (Join-Path $ProjectRoot ".godot_bin")) {
-    $GodotExecutable = (Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot ".godot_bin")).Trim()
   } elseif (Get-Command "godot" -ErrorAction SilentlyContinue) {
     $GodotExecutable = (Get-Command "godot").Source
   } elseif (Get-Command "godot4" -ErrorAction SilentlyContinue) {

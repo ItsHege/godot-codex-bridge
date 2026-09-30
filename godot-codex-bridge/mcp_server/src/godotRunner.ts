@@ -1,9 +1,10 @@
 import fs from "node:fs";
-import fsp from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 
 import { boundedNumber, isInsidePath } from "./config.js";
+import { randomUUID } from "node:crypto";
+import { assertPhysicalPathSync, PhysicalPathError, writeFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject, ServerConfig } from "./types.js";
 
 const SCENE_EXTENSIONS = new Set([".tscn", ".scn"]);
@@ -128,6 +129,15 @@ export async function runTestScene(config: ServerConfig, options: RunTestSceneOp
         scene_path: scene.scenePath,
       },
     };
+  }
+
+  try {
+    assertPhysicalPathSync(config.projectRoot, scene.absolutePath, { requireFile: true });
+  } catch (error) {
+    if (error instanceof PhysicalPathError) {
+      throwInvalidScene(error.code, error.message, { path: scene.scenePath });
+    }
+    throw error;
   }
 
   const args = [
@@ -317,9 +327,10 @@ async function execFileCapture(
 
 async function writeRunLog(config: ServerConfig, data: JsonObject, prefix: string): Promise<string> {
   const logsDir = path.join(config.bridgeDir, "artifacts", "logs");
-  await fsp.mkdir(logsDir, { recursive: true });
-  const logPath = path.join(logsDir, `${prefix}-${new Date().toISOString().replaceAll(":", "-")}.json`);
-  await fsp.writeFile(logPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  const logPath = path.join(logsDir, `${prefix}-${new Date().toISOString().replaceAll(":", "-")}-${randomUUID().slice(0, 8)}.json`);
+  // Create-only confined write: rejects linked directories and never follows
+  // or overwrites an existing (possibly hard-linked) file.
+  writeFileInsideRootSync(config.projectRoot, logPath, `${JSON.stringify(data, null, 2)}\n`);
   return logPath;
 }
 

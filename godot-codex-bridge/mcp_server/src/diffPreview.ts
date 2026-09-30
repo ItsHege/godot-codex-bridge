@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
 
 import { createTwoFilesPatch } from "diff";
 
 import { isInsidePath } from "./config.js";
+import { assertPhysicalPathSync, PhysicalPathError, readFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject } from "./types.js";
 
 const MAX_TEXT_BYTES = 2_000_000;
@@ -78,6 +78,17 @@ export interface PreviewSceneDiffOptions {
 
 export async function previewSceneDiff(options: PreviewSceneDiffOptions): Promise<JsonObject> {
   const resolved = resolvePreviewTarget(options.projectRoot, options.targetPath);
+  try {
+    assertPhysicalPathSync(options.projectRoot, resolved.absolutePath, {
+      allowMissingTail: Boolean(options.allowCreate),
+      requireFile: !options.allowCreate,
+    });
+  } catch (error) {
+    if (error instanceof PhysicalPathError) {
+      throw new PreviewDiffError(error.code, error.message, { path: resolved.relativePath });
+    }
+    throw error;
+  }
 
   if (Buffer.byteLength(options.proposedContent, "utf8") > MAX_TEXT_BYTES) {
     throw new PreviewDiffError("proposed_content_too_large", "Proposed content exceeds MVP preview size limit.", {
@@ -89,7 +100,7 @@ export async function previewSceneDiff(options: PreviewSceneDiffOptions): Promis
     throw new PreviewDiffError("binary_content_rejected", "Proposed content appears to be binary.");
   }
 
-  const existing = await readExistingText(resolved.absolutePath, Boolean(options.allowCreate));
+  const existing = await readExistingText(options.projectRoot, resolved.absolutePath, Boolean(options.allowCreate));
   const context = Math.min(Math.max(Math.trunc(options.contextLines ?? 3), 0), 20);
   const patch = createTwoFilesPatch(
     resolved.relativePath,
@@ -170,12 +181,15 @@ export function resolvePreviewTarget(projectRoot: string, targetPath: string): {
   };
 }
 
-async function readExistingText(filePath: string, allowCreate: boolean): Promise<{ exists: boolean; content: string }> {
+async function readExistingText(projectRoot: string, filePath: string, allowCreate: boolean): Promise<{ exists: boolean; content: string }> {
   let buffer: Buffer;
   try {
-    buffer = await fs.readFile(filePath);
+    buffer = readFileInsideRootSync(projectRoot, filePath);
   } catch (error) {
-    if (allowCreate && isNodeError(error) && error.code === "ENOENT") {
+    if (allowCreate && (
+      (isNodeError(error) && error.code === "ENOENT") ||
+      (error instanceof PhysicalPathError && error.code === "path_unavailable")
+    )) {
       return { exists: false, content: "" };
     }
 

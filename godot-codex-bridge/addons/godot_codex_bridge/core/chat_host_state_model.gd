@@ -2,6 +2,7 @@
 extends RefCounted
 
 const ChatSocketEventModel := preload("res://addons/godot_codex_bridge/core/chat_socket_event_model.gd")
+const ChatSessionAllowModel := preload("res://addons/godot_codex_bridge/core/chat_session_allow_model.gd")
 
 
 static func host_status_patch(data: Dictionary) -> Dictionary:
@@ -15,6 +16,8 @@ static func host_status_patch(data: Dictionary) -> Dictionary:
 	if data.has("trustMode"):
 		var trust: Variant = data.get("trustMode", "off")
 		patch["trust_mode"] = "off" if trust == null else str(trust)
+	if data.has("sessionAllowedTools"):
+		patch["session_allowed_tools"] = ChatSessionAllowModel.sanitize_tools(data.get("sessionAllowedTools"))
 
 	var project: Variant = data.get("activeProject", null)
 	if typeof(project) == TYPE_DICTIONARY:

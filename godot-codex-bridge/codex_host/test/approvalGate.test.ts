@@ -19,7 +19,7 @@ test("ApprovalGate keeps permission grants blocked", async () => {
   assert.match(approval.approval_id, /^approval-/);
   assert.equal(approval.safe_default, "reject");
   assert.equal(approval.approvable_by_chat, false);
-  assert.match(approval.blocked_reason ?? "", /Permission grants are not approvable from chat/);
+  assert.match(approval.blocked_reason ?? "", /Permission grants are not reviewable in Godot chat/);
   assert.deepEqual(approval.required_evidence, []);
   assert.equal(approval.approval_policy_label, "Permission grant blocked");
   await assert.rejects(
@@ -67,6 +67,23 @@ test("ApprovalGate allows one-shot manual command approval without diff evidence
     decision: "approve"
   });
   assert.equal(resolved.runtimeDecision, "approve");
+});
+
+test("ApprovalGate blocks a command with no reviewable text", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-approval-empty-command-"));
+  const gate = new ApprovalGate(dir);
+  const approval = await gate.create({
+    runtime_approval_id: "runtime-empty-command",
+    kind: "command_execution",
+    command: "   ",
+    raw_method: "item/commandExecution/requestApproval",
+    raw_params: {},
+  });
+  assert.equal(approval.approvable_by_chat, false);
+  await assert.rejects(
+    () => gate.resolve({ approval_id: approval.approval_id, nonce: approval.nonce, decision: "approve" }),
+    /approval_not_approvable_by_chat/,
+  );
 });
 
 test("ApprovalGate stages responses and server invalidation wins without a false approval terminal", async () => {
@@ -163,6 +180,16 @@ test("ApprovalGate allows manual file-change approval and writes evidence", asyn
   await assert.rejects(
     () => gate.resolve({
       approval_id: approval.approval_id,
+      nonce: approval.nonce,
+      diff_hash: approval.diff_hash,
+      decision: "approve_session"
+    }),
+    /approval_session_scope_not_allowed: file_change/
+  );
+
+  await assert.rejects(
+    () => gate.resolve({
+      approval_id: approval.approval_id,
       nonce: "wrong",
       diff_hash: approval.diff_hash,
       decision: "approve"
@@ -207,7 +234,7 @@ test("ApprovalGate does not allow file-change approval without diff evidence", a
 
   assert.equal(approval.safe_default, "reject");
   assert.equal(approval.approvable_by_chat, false);
-  assert.match(approval.blocked_reason ?? "", /diff evidence/);
+  assert.match(approval.blocked_reason ?? "", /complete, non-truncated displayed diff/);
   assert.deepEqual(approval.required_evidence, ["diff_hash", "displayed_diff_evidence"]);
   assert.equal(approval.approval_policy_label, "Diff evidence required");
   assert.equal(approval.diff_hash, undefined);
@@ -248,7 +275,7 @@ test("ApprovalGate allows apply_patch approval only when diff hash is present", 
 
   assert.equal(missingDiffApproval.safe_default, "reject");
   assert.equal(missingDiffApproval.approvable_by_chat, false);
-  assert.match(missingDiffApproval.blocked_reason ?? "", /diff evidence/);
+  assert.match(missingDiffApproval.blocked_reason ?? "", /complete, non-truncated displayed diff/);
   await assert.rejects(
     () => gate.resolve({
       approval_id: missingDiffApproval.approval_id,
@@ -257,6 +284,34 @@ test("ApprovalGate allows apply_patch approval only when diff hash is present", 
     }),
     /approval_not_approvable_by_chat/
   );
+});
+
+test("ApprovalGate blocks approvals whose complete diff or command cannot be displayed", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-approval-review-bounds-"));
+  const gate = new ApprovalGate(dir);
+  const changes: Record<string, unknown> = {};
+  for (let index = 0; index < 25; index += 1) {
+    changes[`res://file-${index}.gd`] = { type: "update", unified_diff: "@@\n-old\n+new\n" };
+  }
+  const fileApproval = await gate.create({
+    runtime_approval_id: "runtime-too-many-files",
+    kind: "file_change",
+    file_changes: changes,
+    raw_method: "item/fileChange/requestApproval",
+    raw_params: {}
+  });
+  assert.equal(fileApproval.approvable_by_chat, false);
+  assert.match(fileApproval.blocked_reason ?? "", /complete, non-truncated displayed diff/);
+
+  const commandApproval = await gate.create({
+    runtime_approval_id: "runtime-long-command",
+    kind: "command_execution",
+    command: "x".repeat(1001),
+    raw_method: "item/commandExecution/requestApproval",
+    raw_params: {}
+  });
+  assert.equal(commandApproval.approvable_by_chat, false);
+  assert.match(commandApproval.blocked_reason ?? "", /full command/);
 });
 
 test("ApprovalGate allows user elicitation approval without diff evidence", async () => {

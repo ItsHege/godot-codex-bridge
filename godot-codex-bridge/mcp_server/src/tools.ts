@@ -10,7 +10,6 @@ import { createDiagnosticSnapshot } from "./diagnosticSnapshot.js";
 import { getEditorCapabilities } from "./editorCapabilities.js";
 import { checkExportReadiness } from "./exportReadiness.js";
 import { PreviewDiffError, previewSceneDiff } from "./diffPreview.js";
-import { runProjectParseCheck, runTestScene } from "./godotRunner.js";
 import {
   getAgentsContext,
   getCurrentSourceContext,
@@ -73,12 +72,13 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
     "godot.get_gameplay_context": async () => toolResult(await bridge.readSnapshotSection("gameplay_context")),
     "godot.get_script_inventory": async () => toolResult(await bridge.readSnapshotSection("script_inventory")),
     "godot.list_annotations": async (args = {}) =>
-      toolResult(await listAnnotations(config.bridgeDir, { limit: numberOrDefault(args.limit, 20) })),
-    "godot.get_latest_annotation": async () => toolResult(await getLatestAnnotation(config.bridgeDir)),
+      toolResult(await listAnnotations(config.bridgeDir, { limit: numberOrDefault(args.limit, 20), projectRoot: config.projectRoot })),
+    "godot.get_latest_annotation": async () => toolResult(await getLatestAnnotation(config.bridgeDir, config.projectRoot)),
     "godot.get_annotation": async (args = {}) =>
-      toolResult(await getAnnotation(config.bridgeDir, stringOrDefault(args.annotationId, ""))),
+      toolResult(await getAnnotation(config.bridgeDir, stringOrDefault(args.annotationId, ""), config.projectRoot)),
     "godot.resolve_annotation_target": async (args = {}) =>
       toolResult(await resolveAnnotationTarget(config.bridgeDir, {
+        projectRoot: config.projectRoot,
         annotationId: typeof args.annotationId === "string" ? args.annotationId : undefined,
         markerId: typeof args.markerId === "string" ? args.markerId : undefined,
       })),
@@ -829,6 +829,7 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
             {
               node_path: validateNodePath(stringOrDefault(args.nodePath, "")),
               keep_state: args.keepState !== false,
+              keep_pose: args.keepPose === true,
             },
             numberOrDefault(args.timeoutMs, config.addonRequestTimeoutMs),
           ),
@@ -1201,23 +1202,25 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
       }
     },
     "godot.save_scene": async (args = {}) => {
-      const result = await sendEditorControlRequest(
-        bridge,
-        "save_scene",
-        {},
-        numberOrDefault(args.timeoutMs, config.addonRequestTimeoutMs),
-      );
-      return toolResult(await attachPostSaveCheck(result, config, args));
+      return toolResult({
+        status: "bridge_unavailable",
+        saved: false,
+        mitigation: "operation_disabled",
+        error: {
+          code: "trusted_scene_save_approval_unavailable",
+          message: "Direct scene saving is disabled until a short-lived, single-use human approval can be bound to the exact dirty scene state and target. Save from the Godot editor UI.",
+        },
+      });
     },
-    "godot.save_all_scenes": async (args = {}) =>
-      toolResult(
-        await sendEditorControlRequest(
-          bridge,
-          "save_all_scenes",
-          {},
-          numberOrDefault(args.timeoutMs, config.addonRequestTimeoutMs),
-        ),
-      ),
+    "godot.save_all_scenes": async (_args = {}) => toolResult({
+      status: "bridge_unavailable",
+      saved: false,
+      mitigation: "operation_disabled",
+      error: {
+        code: "trusted_scene_save_approval_unavailable",
+        message: "Direct save-all is disabled until a short-lived, single-use human approval can be bound to every exact dirty scene state and target. Save from the Godot editor UI.",
+      },
+    }),
     "godot.notes_get": async (args = {}) =>
       toolResult(
         await sendEditorControlRequest(
@@ -1261,6 +1264,7 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
     "godot.create_diagnostic_snapshot": async (args = {}) =>
       toolResult(
         await createDiagnosticSnapshot(
+          config.projectRoot,
           config.bridgeDir,
           inspect3dScene(await bridge.readSnapshot()),
           typeof args.label === "string" ? args.label : undefined,
@@ -1280,7 +1284,7 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
         baselineName: typeof args.baselineName === "string" ? args.baselineName : undefined,
       })),
     "godot.compare_visual_regression": async (args = {}) =>
-      toolResult(await compareVisualRegression(config.bridgeDir, {
+      toolResult(await compareVisualRegression(config.projectRoot, config.bridgeDir, {
         currentScreenshotPath: stringOrDefault(args.currentScreenshotPath, ""),
         baselineName: typeof args.baselineName === "string" ? args.baselineName : undefined,
         baselinePath: typeof args.baselinePath === "string" ? args.baselinePath : undefined,
@@ -1311,18 +1315,15 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
         return toolResult(errorEnvelope(error));
       }
     },
-    "godot.fix_selected_node": async (args = {}) =>
-      toolResult(
-        await bridge.sendAddonRequest(
-          "fix_selected_node",
-          {
-            requested_by: "mcp_server",
-            fix_code: stringOrDefault(args.fixCode, ""),
-            approval_token: stringOrDefault(args.approvalToken, ""),
-          },
-          numberOrDefault(args.timeoutMs, config.addonRequestTimeoutMs),
-        ),
-      ),
+    "godot.fix_selected_node": async (_args = {}) => toolResult({
+      status: "bridge_unavailable",
+      changed: false,
+      mitigation: "operation_disabled",
+      error: {
+        code: "trusted_node_fix_approval_unavailable",
+        message: "Direct selected-node fixes are disabled until a short-lived, single-use human approval can be bound to the exact project, selected node, property, old value, and proposed value. Use the Godot editor UI and UndoRedo directly.",
+      },
+    }),
     "godot.capture_viewport_screenshot": async (args = {}) =>
       toolResult(
         await bridge.sendAddonRequest(
@@ -1440,56 +1441,20 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
           numberOrDefault(args.timeoutMs, config.addonRequestTimeoutMs),
         ),
       ),
-    "godot.playtest_input": async (args = {}) => {
-      try {
-        return toolResult(
-          await sendEditorControlRequest(
-            bridge,
-            "playtest_input",
-            playtestInputParams(args),
-            numberOrDefault(args.timeoutMs, config.addonRequestTimeoutMs),
-          ),
-        );
-      } catch (error) {
-        return toolResult(errorEnvelope(error));
-      }
-    },
-    "godot.run_playtest_scenario": async (args = {}) => {
-      try {
-        const timeoutMs = boundedInteger(args.timeoutMs, config.runSceneTimeoutMs, 1_000, 60_000, "invalid_playtest_scenario_timeout");
-        return toolResult(
-          await bridge.sendAddonRequest(
-            "editor_control",
-            {
-              requested_by: "mcp_server",
-              action: "run_playtest_scenario",
-              params: {
-                scene_path: await validateOpenScenePath(config.projectRoot, stringOrDefault(args.scenePath, "")),
-                steps: validatePlaytestScenarioSteps(args.steps),
-                timeout_ms: timeoutMs,
-              },
-            },
-            timeoutMs,
-            { skipHostRpc: true },
-          ),
-        );
-      } catch (error) {
-        return toolResult(errorEnvelope(error));
-      }
-    },
+    "godot.playtest_input": async () => toolResult(disabledRuntimeInputEnvelope()),
+    "godot.run_playtest_scenario": async () => toolResult(disabledRuntimeInputEnvelope()),
     "godot.runtime_get_state": async (args = {}) => toolResult(await getRuntimeState(config, args)),
     "godot.runtime_get_events": async (args = {}) => toolResult(await getRuntimeEvents(config, args)),
     "godot.run_test_scene": async (args = {}) => {
-      try {
-        return toolResult(
-          await runTestScene(config, {
-            scenePath: stringOrDefault(args.scenePath, "res://scenes/test_3d.tscn"),
-            timeoutMs: numberOrUndefined(args.timeoutMs),
-          }),
-        );
-      } catch (error) {
-        return toolResult(errorEnvelope(error));
-      }
+      return toolResult({
+        status: "bridge_unavailable",
+        ran: false,
+        mitigation: "operation_disabled",
+        error: {
+          code: "trusted_runtime_approval_unavailable",
+          message: "Direct MCP scene execution is disabled until a live, default-off runtime authorization is available. Use the permission-gated Godot editor run workflow.",
+        },
+      });
     },
     "godot.preview_scene_diff": async (args = {}) => {
       try {
@@ -1505,6 +1470,18 @@ export function createToolHandlers(config: ServerConfig): Record<string, (args?:
       } catch (error) {
         return toolResult(errorEnvelope(error));
       }
+    },
+  };
+}
+
+function disabledRuntimeInputEnvelope(): ToolEnvelope {
+  return {
+    status: "bridge_unavailable",
+    ran: false,
+    mitigation: "operation_disabled",
+    error: {
+      code: "trusted_runtime_approval_unavailable",
+      message: "Direct MCP playtest input and scenario execution are disabled until the addon exposes a default-off, live-authorized production action with bounded session provenance.",
     },
   };
 }
@@ -1546,41 +1523,6 @@ async function enrichCurrentScene(envelope: ToolEnvelope, config: ServerConfig):
     ...envelope,
     project_root: config.projectRoot,
     bridge_dir: config.bridgeDir,
-  };
-}
-
-async function attachPostSaveCheck(
-  envelope: ToolEnvelope,
-  config: ServerConfig,
-  args: JsonObject,
-): Promise<ToolEnvelope> {
-  if (envelope.status !== "ok" || !isJsonObject(envelope.response)) {
-    return envelope;
-  }
-  const response = envelope.response;
-  if (response.status !== "succeeded" || !isJsonObject(response.data)) {
-    return envelope;
-  }
-  const data = response.data;
-  if (data.saved !== true) {
-    return envelope;
-  }
-
-  const postSaveCheck = await runProjectParseCheck(config, {
-    timeoutMs: numberOrDefault(args.postSaveCheckTimeoutMs, config.runSceneTimeoutMs),
-  });
-  return {
-    ...envelope,
-    post_save_check: postSaveCheck,
-    post_save_check_passed: postSaveCheck.status === "ok",
-    response: {
-      ...response,
-      data: {
-        ...data,
-        post_save_check: postSaveCheck,
-        post_save_check_passed: postSaveCheck.status === "ok",
-      },
-    },
   };
 }
 
@@ -1942,42 +1884,18 @@ async function withOptionalMultiViewBaselineComparison(
   if (result.status !== "ok" || (!baselineName && !baselinePath)) {
     return result;
   }
-
   const frames = multiViewFrames(result);
-  const comparisons: JsonObject[] = [];
-  for (const frame of frames) {
-    const view = typeof frame.view === "string" ? frame.view : "unknown";
-    const screenshotPath = screenshotPathFromFrame(frame);
-    if (!screenshotPath) {
-      comparisons.push({
-        view,
-        status: "skipped",
-        reason: "frame_without_png_path",
-      });
-      continue;
-    }
-    comparisons.push({
-      view,
-      screenshot_path: screenshotPath,
-      result: await compareVisualRegression(config.bridgeDir, {
-        currentScreenshotPath: screenshotPath,
-        baselineName,
-        baselinePath,
-      }),
-    });
-  }
 
   return {
     ...result,
     baseline_comparison: {
-      status: comparisons.some((comparison) => {
-        const comparisonResult = comparison.result;
-        return isJsonObject(comparisonResult) && comparisonResult.status === "ok";
-      }) ? "ok" : "no_successful_comparisons",
+      status: "disabled",
       baseline_name: baselineName ?? null,
       baseline_path: baselinePath ?? null,
-      compared_frames: comparisons.length,
-      comparisons,
+      considered_frames: frames.length,
+      compared_frames: 0,
+      mitigation: "trusted_visual_input_provenance_unavailable",
+      message: "Visual comparison is disabled until both inputs have Bridge-owned provenance and live screenshot permission can be verified.",
     },
   };
 }

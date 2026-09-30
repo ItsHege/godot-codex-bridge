@@ -47,6 +47,7 @@ export interface CodexRuntimeAdapter {
   readonly kind: string;
   createBackgroundRuntime?(index: number): CodexRuntimeAdapter;
   inspectMcpTools?(threadId?: string): Promise<RuntimeToolInventory>;
+  setBridgeProject?(projectRoot: string, bridgeDir: string): void;
   listModels?(): Promise<RuntimeModelInventory>;
   previewBridgeTools?(project: ProjectSummary): Promise<BridgeToolsRegistrationPlan>;
   enableBridgeTools?(project: ProjectSummary, evidenceDir: string): Promise<BridgeToolsEnableResult>;

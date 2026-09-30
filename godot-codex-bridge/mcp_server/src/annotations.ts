@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { assertPhysicalPathSync, readFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject, ToolEnvelope } from "./types.js";
 
 const ANNOTATIONS_DIR = path.join("artifacts", "annotations");
@@ -10,12 +11,14 @@ const ANNOTATION_ID_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
 export async function listAnnotations(
   bridgeDir: string,
-  options: { limit?: number } = {},
+  options: { limit?: number; projectRoot?: string } = {},
 ): Promise<ToolEnvelope> {
   const baseDir = annotationsDir(bridgeDir);
+  const projectRoot = options.projectRoot ?? inferredProjectRoot(bridgeDir);
   const limit = boundedLimit(options.limit);
   let entries: string[];
   try {
+    assertPhysicalPathSync(projectRoot, baseDir, { requireDirectory: true });
     entries = await fs.readdir(baseDir);
   } catch {
     return {
@@ -32,7 +35,7 @@ export async function listAnnotations(
     if (!isValidAnnotationId(entry)) {
       continue;
     }
-    const envelope = await readAnnotationById(bridgeDir, entry, { includeManifest: false });
+    const envelope = await readAnnotationById(bridgeDir, entry, { includeManifest: false, projectRoot });
     if (envelope.status === "ok") {
       annotations.push(annotationListItem(envelope));
     }
@@ -49,8 +52,8 @@ export async function listAnnotations(
   };
 }
 
-export async function getLatestAnnotation(bridgeDir: string): Promise<ToolEnvelope> {
-  const listed = await listAnnotations(bridgeDir, { limit: 1 });
+export async function getLatestAnnotation(bridgeDir: string, projectRoot = inferredProjectRoot(bridgeDir)): Promise<ToolEnvelope> {
+  const listed = await listAnnotations(bridgeDir, { limit: 1, projectRoot });
   const annotations = Array.isArray(listed.annotations) ? listed.annotations : [];
   const latest = annotations[0] as JsonObject | undefined;
   if (!latest || typeof latest.annotation_id !== "string") {
@@ -63,20 +66,20 @@ export async function getLatestAnnotation(bridgeDir: string): Promise<ToolEnvelo
       annotations_dir: annotationsDir(bridgeDir),
     };
   }
-  return getAnnotation(bridgeDir, latest.annotation_id);
+  return getAnnotation(bridgeDir, latest.annotation_id, projectRoot);
 }
 
-export async function getAnnotation(bridgeDir: string, annotationId: string): Promise<ToolEnvelope> {
-  return readAnnotationById(bridgeDir, annotationId, { includeManifest: true });
+export async function getAnnotation(bridgeDir: string, annotationId: string, projectRoot = inferredProjectRoot(bridgeDir)): Promise<ToolEnvelope> {
+  return readAnnotationById(bridgeDir, annotationId, { includeManifest: true, projectRoot });
 }
 
 export async function resolveAnnotationTarget(
   bridgeDir: string,
-  options: { annotationId?: string; markerId?: string } = {},
+  options: { annotationId?: string; markerId?: string; projectRoot?: string } = {},
 ): Promise<ToolEnvelope> {
   const envelope = options.annotationId
-    ? await getAnnotation(bridgeDir, options.annotationId)
-    : await getLatestAnnotation(bridgeDir);
+    ? await getAnnotation(bridgeDir, options.annotationId, options.projectRoot)
+    : await getLatestAnnotation(bridgeDir, options.projectRoot);
   if (envelope.status !== "ok") {
     return envelope;
   }
@@ -119,7 +122,7 @@ export async function resolveAnnotationTarget(
 async function readAnnotationById(
   bridgeDir: string,
   annotationId: string,
-  options: { includeManifest: boolean },
+  options: { includeManifest: boolean; projectRoot: string },
 ): Promise<ToolEnvelope> {
   if (!isValidAnnotationId(annotationId)) {
     return {
@@ -144,9 +147,9 @@ async function readAnnotationById(
   }
 
   const manifestPath = path.join(annotationDir, "annotation.json");
-  let stat;
+  let manifestBytes: Buffer;
   try {
-    stat = await fs.stat(manifestPath);
+    manifestBytes = readFileInsideRootSync(options.projectRoot, manifestPath);
   } catch {
     return {
       status: "not_found",
@@ -158,18 +161,7 @@ async function readAnnotationById(
       artifact_dir: annotationDir,
     };
   }
-  if (!stat.isFile()) {
-    return {
-      status: "invalid_request",
-      error: {
-        code: "annotation_manifest_invalid",
-        message: "annotation.json is not a file.",
-      },
-      annotation_id: annotationId,
-      artifact_dir: annotationDir,
-    };
-  }
-  if (stat.size > MAX_ANNOTATION_JSON_BYTES) {
+  if (manifestBytes.byteLength > MAX_ANNOTATION_JSON_BYTES) {
     return {
       status: "invalid_request",
       error: {
@@ -183,7 +175,7 @@ async function readAnnotationById(
 
   let manifest: JsonObject;
   try {
-    manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as JsonObject;
+    manifest = JSON.parse(manifestBytes.toString("utf8")) as JsonObject;
   } catch (error) {
     return {
       status: "invalid_request",
@@ -198,7 +190,7 @@ async function readAnnotationById(
 
   const rawImagePath = path.join(annotationDir, "raw.png");
   const annotatedImagePath = path.join(annotationDir, "annotated.png");
-  const imageStatus = await annotationImageStatus(rawImagePath, annotatedImagePath);
+  const imageStatus = await annotationImageStatus(options.projectRoot, rawImagePath, annotatedImagePath);
 
   return {
     status: "ok",
@@ -223,10 +215,10 @@ async function readAnnotationById(
   };
 }
 
-async function annotationImageStatus(rawImagePath: string, annotatedImagePath: string): Promise<JsonObject> {
+async function annotationImageStatus(projectRoot: string, rawImagePath: string, annotatedImagePath: string): Promise<JsonObject> {
   const [raw, annotated] = await Promise.all([
-    fileSummary(rawImagePath),
-    fileSummary(annotatedImagePath),
+    fileSummary(projectRoot, rawImagePath),
+    fileSummary(projectRoot, annotatedImagePath),
   ]);
   return {
     raw_exists: raw.exists,
@@ -236,13 +228,17 @@ async function annotationImageStatus(rawImagePath: string, annotatedImagePath: s
   };
 }
 
-async function fileSummary(filePath: string): Promise<{ exists: boolean; byteSize: number }> {
+async function fileSummary(projectRoot: string, filePath: string): Promise<{ exists: boolean; byteSize: number }> {
   try {
-    const stat = await fs.stat(filePath);
-    return { exists: stat.isFile(), byteSize: stat.isFile() ? stat.size : 0 };
+    const bytes = readFileInsideRootSync(projectRoot, filePath);
+    return { exists: true, byteSize: bytes.byteLength };
   } catch {
     return { exists: false, byteSize: 0 };
   }
+}
+
+function inferredProjectRoot(bridgeDir: string): string {
+  return path.resolve(bridgeDir, "..", "..");
 }
 
 function annotationListItem(envelope: ToolEnvelope): JsonObject {

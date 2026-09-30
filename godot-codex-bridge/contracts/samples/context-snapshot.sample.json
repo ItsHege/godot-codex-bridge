@@ -29,7 +29,7 @@
       "name": "Main3D",
       "type": "Node3D"
     },
-    "is_dirty": false,
+    "is_dirty": null,
     "open_scenes": [
       "res://scenes/main_3d.tscn"
     ]

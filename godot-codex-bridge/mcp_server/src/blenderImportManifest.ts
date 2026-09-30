@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { isInsidePath } from "./config.js";
 import { isJsonObject } from "./bridge.js";
+import { assertPhysicalPathSync, PhysicalPathError, readFileInsideRootBoundedSync } from "./physicalPath.js";
 import type { JsonObject, JsonValue, ServerConfig, ToolEnvelope } from "./types.js";
 
 const ALLOWLIST_ROOT = "res://assets/ai_imports/blender";
@@ -21,7 +22,6 @@ export async function planBlenderAssetImport(config: ServerConfig, args: JsonObj
   if (!isInsidePath(allowlistAbsRoot, manifestAbsPath)) {
     return invalid("invalid_manifest_path", "Manifest must stay inside res://assets/ai_imports/blender.");
   }
-
   let parsed: unknown;
   let manifestText = "";
   try {
@@ -31,6 +31,8 @@ export async function planBlenderAssetImport(config: ServerConfig, args: JsonObj
         manifest_path: manifestResPath,
       });
     }
+    assertPhysicalPathSync(config.projectRoot, allowlistAbsRoot, { requireDirectory: true });
+    assertPhysicalPathSync(config.projectRoot, manifestAbsPath, { requireFile: true });
     if (stat.size > MAX_MANIFEST_BYTES) {
       return invalid("blender_import_manifest_too_large", `Blender import manifest is limited to ${MAX_MANIFEST_BYTES} bytes.`, {
         manifest_path: manifestResPath,
@@ -38,7 +40,7 @@ export async function planBlenderAssetImport(config: ServerConfig, args: JsonObj
         max_bytes: MAX_MANIFEST_BYTES,
       });
     }
-    manifestText = await fs.readFile(manifestAbsPath, "utf8");
+    manifestText = readFileInsideRootBoundedSync(config.projectRoot, manifestAbsPath, MAX_MANIFEST_BYTES).toString("utf8");
   } catch (error) {
     return {
       status: "not_found",
@@ -148,6 +150,16 @@ async function normalizeManifestAsset(
     return rejected(index, "asset_path_outside_allowlist", "Asset path resolved outside the Blender AI import allowlist.", {
       asset_path: assetPath.value,
     });
+  }
+  try {
+    assertPhysicalPathSync(config.projectRoot, absolutePath, { allowMissingTail: true });
+  } catch (error) {
+    return rejected(
+      index,
+      error instanceof PhysicalPathError ? error.code : "asset_path_unavailable",
+      error instanceof Error ? error.message : "Asset path could not be physically confined.",
+      { asset_path: assetPath.value },
+    );
   }
   let exists = true;
   try {

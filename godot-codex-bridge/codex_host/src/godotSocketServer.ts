@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
 import { fail, ok, parseMessage } from "./jsonRpc.js";
 import type { HostController } from "./hostController.js";
@@ -6,23 +7,43 @@ import type { HostEvent, JsonRpcRequest } from "./types.js";
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 const DEFAULT_BRIDGE_RPC_TIMEOUT_MS = 5_000;
+const MAX_UNPAIRED_CLIENTS = 8;
 type JsonObject = Record<string, unknown>;
 
 export class GodotSocketServer {
   private httpServer: Server | null = null;
   private server: WebSocketServer | null = null;
   private readonly clients = new Set<WebSocket>();
+  private pairedClient: WebSocket | null = null;
+  // Godot answers pings only while its editor loop runs, so a paired editor
+  // stalled by a long import looks silent too. Never drop it on silence alone
+  // (re-pairing needs the secret again); only a new connection may replace a
+  // paired socket that has missed pongs. Unpaired sockets must pair promptly.
+  heartbeatIntervalMs = 15_000;
+  pairingDeadlineMs = 30_000;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private readonly missedPongs = new Map<WebSocket, number>();
+  private readonly connectedAt = new Map<WebSocket, number>();
+  private readonly pairingAttempts = new Map<WebSocket, number>();
+  private readonly pairingChallenges = new Map<WebSocket, { clientNonce: string; serverNonce: string; expiresAt: number }>();
   private readonly pendingBridgeRequests = new Map<string, {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
     timer: NodeJS.Timeout;
+    client: WebSocket;
   }>();
 
   constructor(
     private readonly host: string,
     private readonly port: number,
-    private readonly controller: HostController
-  ) {}
+    private readonly controller: HostController,
+    private readonly launchNonce = "",
+    private readonly pairingSecret = randomBytes(32).toString("hex")
+  ) {
+    if (!/^[a-f0-9]{64}$/.test(pairingSecret)) {
+      throw new Error("Host pairing secret must be 64 lowercase hex characters.");
+    }
+  }
 
   async start(): Promise<void> {
     if (this.server) {
@@ -41,14 +62,19 @@ export class GodotSocketServer {
       void (async () => {
         if (request.url === "/health" && request.method === "GET") {
           response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify(this.controller.status()));
+          response.end(JSON.stringify({
+            ok: true,
+            runtime: this.controller.status().runtime,
+            port: this.addressPort(),
+            ...(this.launchNonce ? { launch_proof: createHmac("sha256", Buffer.from(this.launchNonce, "hex")).update("godot-codex-bridge-host-health-v1").digest("hex") } : {})
+          }));
           return;
         }
         if (request.url === "/bridge/request" && request.method === "POST") {
-          const body = await readJsonBody(request);
-          const result = await this.forwardBridgeRequest(body);
-          response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify(result));
+          // The MCP process is not an authenticated addon. File polling remains
+          // available until a separately authenticated request transport exists.
+          response.writeHead(503, { "content-type": "application/json" });
+          response.end(JSON.stringify({ status: "error", error: { code: "bridge_rpc_unavailable", message: "Use project-scoped request files." } }));
           return;
         }
         response.writeHead(404, { "content-type": "application/json" });
@@ -77,9 +103,31 @@ export class GodotSocketServer {
     });
     this.server.on("connection", (socket) => this.onConnection(socket));
     this.controller.on("event", (event: HostEvent) => this.broadcast(event));
+    this.heartbeatTimer = setInterval(() => this.checkHeartbeats(), this.heartbeatIntervalMs);
+    this.heartbeatTimer.unref();
+  }
+
+  private checkHeartbeats(): void {
+    const now = Date.now();
+    for (const client of this.clients) {
+      const missed = this.missedPongs.get(client) ?? 0;
+      if (client !== this.pairedClient &&
+        (missed >= 1 || now - (this.connectedAt.get(client) ?? now) > this.pairingDeadlineMs)) {
+        client.terminate();
+        continue;
+      }
+      this.missedPongs.set(client, missed + 1);
+      client.ping();
+    }
   }
 
   async stop(): Promise<void> {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.missedPongs.clear();
+    this.connectedAt.clear();
     for (const pending of this.pendingBridgeRequests.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error("bridge_rpc_server_stopping"));
@@ -89,6 +137,9 @@ export class GodotSocketServer {
       client.terminate();
     }
     this.clients.clear();
+    this.pairedClient = null;
+    this.pairingAttempts.clear();
+    this.pairingChallenges.clear();
     if (!this.server) {
       return;
     }
@@ -120,16 +171,50 @@ export class GodotSocketServer {
   }
 
   private onConnection(socket: WebSocket): void {
+    if (this.controller.isShuttingDown()) {
+      socket.close(1013, "host_shutting_down");
+      return;
+    }
+    if (this.pairedClient && this.pairedClient.readyState === this.pairedClient.OPEN) {
+      // Two unanswered pings: treat the paired socket as half-open so the
+      // reconnecting addon is not locked out until TCP notices.
+      if ((this.missedPongs.get(this.pairedClient) ?? 0) < 2) {
+        socket.close(1008, "addon_already_paired");
+        return;
+      }
+      this.pairedClient.terminate();
+    }
+    if (this.clients.size - (this.pairedClient ? 1 : 0) >= MAX_UNPAIRED_CLIENTS) {
+      socket.close(1013, "too_many_unpaired_clients");
+      return;
+    }
     this.clients.add(socket);
+    this.connectedAt.set(socket, Date.now());
     // ws emits an error before closing oversized/malformed frames. Handle it
     // locally so an untrusted frame cannot crash the host process.
     socket.on("error", () => socket.terminate());
-    socket.on("close", () => this.clients.delete(socket));
+    socket.on("pong", () => this.missedPongs.delete(socket));
+    socket.on("close", () => {
+      this.clients.delete(socket);
+      this.missedPongs.delete(socket);
+      this.connectedAt.delete(socket);
+      this.pairingAttempts.delete(socket);
+      this.pairingChallenges.delete(socket);
+      if (this.pairedClient === socket) {
+        this.pairedClient = null;
+        for (const [id, pending] of this.pendingBridgeRequests) {
+          if (pending.client !== socket) continue;
+          clearTimeout(pending.timer);
+          this.pendingBridgeRequests.delete(id);
+          pending.reject(new BridgeHttpError(503, "addon_disconnected", "Paired addon disconnected."));
+        }
+      }
+    });
     socket.on("message", (raw) => void this.onMessage(socket, raw));
     socket.send(JSON.stringify({
       jsonrpc: "2.0",
-      method: "host.status",
-      params: this.controller.status()
+      method: "host.pair_required",
+      params: { protocol: "godot-codex-bridge/pair-v2" }
     }));
   }
 
@@ -151,8 +236,67 @@ export class GodotSocketServer {
       return;
     }
 
+    if (request.method === "host.pair") {
+      if (request.id === undefined) {
+        socket.send(JSON.stringify(fail(null, -32600, "pair_request_id_required")));
+        return;
+      }
+      if (this.pairedClient && this.pairedClient !== socket) {
+        socket.send(JSON.stringify(fail(request.id, -32003, "addon_already_paired")));
+        socket.close(1008, "addon_already_paired");
+        return;
+      }
+      if (this.pairedClient === socket || this.pairingChallenges.has(socket)) {
+        socket.send(JSON.stringify(fail(request.id, -32003, "pairing_in_progress")));
+        return;
+      }
+      const clientNonce = isJsonObject(request.params) ? request.params.client_nonce : undefined;
+      if (typeof clientNonce !== "string" || !/^[a-f0-9]{64}$/.test(clientNonce)) {
+        const attempts = (this.pairingAttempts.get(socket) ?? 0) + 1;
+        this.pairingAttempts.set(socket, attempts);
+        socket.send(JSON.stringify(fail(request.id, -32003, "invalid_pairing_nonce")));
+        if (attempts >= 5) socket.close(1008, "pairing_failed");
+        return;
+      }
+      const serverNonce = randomBytes(32).toString("hex");
+      this.pairingChallenges.set(socket, { clientNonce, serverNonce, expiresAt: Date.now() + 30_000 });
+      socket.send(JSON.stringify(ok(request.id, {
+        server_nonce: serverNonce,
+        server_proof: pairProof(this.pairingSecret, `host:${clientNonce}:${serverNonce}`)
+      })));
+      return;
+    }
+    if (request.method === "host.pair_complete") {
+      if (request.id === undefined) {
+        socket.send(JSON.stringify(fail(null, -32600, "pair_request_id_required")));
+        return;
+      }
+      const challenge = this.pairingChallenges.get(socket);
+      this.pairingChallenges.delete(socket);
+      const rawProof = isJsonObject(request.params) ? request.params.client_proof : undefined;
+      const expectedProof = challenge
+        ? pairProof(this.pairingSecret, `addon:${challenge.clientNonce}:${challenge.serverNonce}`)
+        : "";
+      const candidate = typeof rawProof === "string" && /^[a-f0-9]{64}$/.test(rawProof) ? Buffer.from(rawProof, "hex") : Buffer.alloc(0);
+      const expected = expectedProof ? Buffer.from(expectedProof, "hex") : Buffer.alloc(0);
+      if (this.pairedClient || !challenge || challenge.expiresAt < Date.now() || candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) {
+        socket.send(JSON.stringify(fail(request.id, -32003, "pairing_failed")));
+        socket.close(1008, "pairing_failed");
+        return;
+      }
+      this.pairedClient = socket;
+      this.pairingAttempts.delete(socket);
+      socket.send(JSON.stringify(ok(request.id, { paired: true })));
+      socket.send(JSON.stringify({ jsonrpc: "2.0", method: "host.status", params: this.controller.status() }));
+      return;
+    }
+    if (socket !== this.pairedClient) {
+      if (request.id !== undefined) socket.send(JSON.stringify(fail(request.id, -32003, "pairing_required")));
+      return;
+    }
+
     if (request.method === "bridge.addon_response") {
-      this.handleBridgeResponse(request.params as JsonObject);
+      this.handleBridgeResponse(socket, request.params as JsonObject);
       return;
     }
 
@@ -170,10 +314,9 @@ export class GodotSocketServer {
 
   private broadcast(event: HostEvent): void {
     const text = JSON.stringify(event);
-    for (const client of this.clients) {
-      if (client.readyState === client.OPEN) {
-        client.send(text);
-      }
+    const client = this.pairedClient;
+    if (client && client.readyState === client.OPEN) {
+      client.send(text);
     }
   }
 
@@ -200,8 +343,8 @@ export class GodotSocketServer {
       throw new BridgeHttpError(409, "request_id_conflict", `Bridge RPC request_id is already pending: ${requestId}`);
     }
 
-    const openClients = [...this.clients].filter((client) => client.readyState === client.OPEN);
-    if (openClients.length === 0) {
+    const client = this.pairedClient;
+    if (!client || client.readyState !== client.OPEN) {
       throw new BridgeHttpError(409, "addon_not_connected", "No Godot addon WebSocket client is connected.");
     }
 
@@ -212,7 +355,7 @@ export class GodotSocketServer {
         reject(new BridgeHttpError(504, "bridge_rpc_timeout", `Timed out waiting ${timeoutMs}ms for Godot addon RPC response.`));
       }, timeoutMs);
       timer.unref();
-      this.pendingBridgeRequests.set(requestId, { resolve, reject, timer });
+      this.pendingBridgeRequests.set(requestId, { resolve, reject, timer, client });
     });
 
     const message = JSON.stringify({
@@ -223,20 +366,18 @@ export class GodotSocketServer {
         request
       }
     });
-    for (const client of openClients) {
-      client.send(message);
-    }
+    client.send(message);
 
     return responsePromise;
   }
 
-  private handleBridgeResponse(params: JsonObject | undefined): void {
+  private handleBridgeResponse(socket: WebSocket, params: JsonObject | undefined): void {
     if (!isJsonObject(params)) {
       return;
     }
     const requestId = typeof params.request_id === "string" ? params.request_id : "";
     const pending = this.pendingBridgeRequests.get(requestId);
-    if (!pending) {
+    if (!pending || pending.client !== socket || socket !== this.pairedClient) {
       return;
     }
     clearTimeout(pending.timer);
@@ -248,6 +389,10 @@ export class GodotSocketServer {
       response: params.response
     });
   }
+}
+
+function pairProof(secret: string, message: string): string {
+  return createHmac("sha256", Buffer.from(secret, "hex")).update(message, "utf8").digest("hex");
 }
 
 class BridgeHttpError extends Error {

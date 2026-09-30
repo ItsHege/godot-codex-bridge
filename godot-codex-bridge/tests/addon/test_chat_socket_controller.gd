@@ -53,7 +53,7 @@ func _run() -> void:
 
 	var connect_start := ChatSocketController.connect_request_plan(true, false, WebSocketPeer.STATE_CLOSED)
 	_assert_eq(connect_start.get("action"), "connect", "connect plan starts closed socket")
-	_assert_true(bool(connect_start.get("host_connect_autostart_allowed", false)), "connect plan enables autostart")
+	_assert_false(bool(connect_start.get("host_connect_autostart_allowed", true)), "connect plan never enables project-driven autostart")
 	_assert_false(bool(connect_start.get("host_launch_attempted", true)), "connect plan resets launch attempted")
 	_assert_false(bool(connect_start.get("chat_auto_enable_tools_requested", true)), "connect plan resets auto tools")
 	_assert_true(bool(connect_start.get("log_attempt", false)), "connect plan logs attempt")
@@ -79,7 +79,7 @@ func _run() -> void:
 	_assert_eq(connect_start_effects.size(), 2, "connect start effect count")
 	_assert_eq((connect_start_effects[0] as Dictionary).get("action"), "apply_connect_request_state", "connect start state effect")
 	var connect_start_state := (connect_start_effects[0] as Dictionary).get("state", {}) as Dictionary
-	_assert_true(bool(connect_start_state.get("host_connect_autostart_allowed", false)), "connect start effect enables autostart")
+	_assert_false(bool(connect_start_state.get("host_connect_autostart_allowed", true)), "connect effect keeps autostart disabled")
 	_assert_false(bool(connect_start_state.get("host_launch_attempted", true)), "connect start effect resets launch")
 	_assert_false(bool(connect_start_state.get("chat_auto_enable_tools_requested", true)), "connect start effect clears auto tools")
 	_assert_eq((connect_start_effects[1] as Dictionary).get("action"), "attempt_connect", "connect start attempts connect")
@@ -247,7 +247,7 @@ func _run() -> void:
 
 	var closed_error := ChatSocketController.closed_socket_decision("connecting", "connecting", false, false, false)
 	_assert_eq(closed_error.get("runtime_state"), "error_recoverable", "closed unavailable is recoverable")
-	_assert_true(str(closed_error.get("system_message", "")).find("Codex is not available") >= 0, "closed unavailable message")
+	_assert_true(str(closed_error.get("system_message", "")).find("trusted installation") >= 0, "closed unavailable gives manual-start instruction")
 
 	var closed_start_effects := ChatSocketController.closed_socket_effect_plan("connecting", "connecting", true, false, false)
 	var start_effects := closed_start_effects.get("effects", []) as Array
@@ -328,11 +328,9 @@ func _run() -> void:
 		"node_entry": "C:/bridge/codex_host/dist/src/index.js",
 		"start_script": "C:/bridge/scripts/start_codex_host.ps1",
 	}, true, true, 49390)
-	_assert_true(bool(start_request_launch.get("ok", false)), "start request launch ok")
-	_assert_eq(start_request_launch.get("action"), "launch", "start request launch action")
-	_assert_eq(str(start_request_launch.get("executable", "")), "node", "start request launch executable")
-	var start_request_args: PackedStringArray = start_request_launch.get("args", PackedStringArray())
-	_assert_eq(start_request_args[0], "C:/bridge/codex_host/dist/src/index.js", "start request launch args")
+	_assert_false(bool(start_request_launch.get("ok", true)), "project config cannot request launch")
+	_assert_eq(start_request_launch.get("action"), "failure", "disabled launch returns failure action")
+	_assert_eq(str((start_request_launch.get("launch_plan", {}) as Dictionary).get("error_code", "")), "automatic_launch_disabled", "disabled launch code")
 
 	var start_request_failure := ChatSocketController.host_start_request_effect_plan(false, {
 		"node_entry": "C:/bridge/codex_host/dist/src/index.js",
@@ -341,7 +339,7 @@ func _run() -> void:
 	var start_request_failure_effects := start_request_failure.get("effects", []) as Array
 	_assert_false(bool(start_request_failure.get("ok", true)), "start request failure not ok")
 	_assert_eq(start_request_failure.get("action"), "failure", "start request failure action")
-	_assert_eq(str((start_request_failure.get("launch_plan", {}) as Dictionary).get("error_code", "")), "launcher_missing", "start request failure code")
+	_assert_eq(str((start_request_failure.get("launch_plan", {}) as Dictionary).get("error_code", "")), "automatic_launch_disabled", "start request failure code")
 	_assert_eq((start_request_failure_effects[0] as Dictionary).get("action"), "system_message", "start request failure message effect")
 
 	var start_state := ChatSocketController.host_start_success_state(123, 1000, 30.0)
@@ -393,6 +391,11 @@ func _run() -> void:
 	})
 	_assert_eq(missing_launcher.get("host_config_status"), "launcher_missing", "missing launcher status")
 	_assert_true(str(missing_launcher.get("host_config_message", "")).find("Launcher files") >= 0, "missing launcher message")
+	var disabled_launch := ChatSocketController.host_start_failure_state({
+		"error_code": "automatic_launch_disabled",
+	})
+	_assert_eq(disabled_launch.get("host_config_status"), "manual_start_required", "disabled launch preserves manual connection config")
+	_assert_true(str(disabled_launch.get("host_config_message", "")).find("trusted installation") >= 0, "disabled launch explains manual start")
 
 	var missing_config_effect_plan := ChatSocketController.host_start_failure_effect_plan({
 		"error_code": "missing_config",

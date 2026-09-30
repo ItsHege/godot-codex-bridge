@@ -1,9 +1,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ensureDirectoryInsideRootSync, writeFileInsideRootSync } from "./physicalPath.js";
 import type { ApprovalRespondParams, HostApproval, RuntimeApprovalRequest, TrustMode } from "./types.js";
 
 const APPROVAL_TTL_MS = 5 * 60 * 1000;
+const MAX_APPROVAL_FILES = 24;
+const MAX_APPROVAL_DIFF_LINES_PER_FILE = 360;
+const MAX_APPROVAL_COMMAND_CHARS = 1000;
 
 export class ApprovalGate {
   private readonly approvals = new Map<string, HostApproval>();
@@ -13,10 +17,15 @@ export class ApprovalGate {
   constructor(
     private readonly approvalDir: string,
     private readonly trustMode: () => TrustMode = () => "off",
+    private readonly physicalRoot: string = path.dirname(approvalDir),
   ) {}
 
   async init(): Promise<void> {
-    await fs.mkdir(this.approvalDir, { recursive: true });
+    ensureDirectoryInsideRootSync(this.physicalRoot, this.approvalDir);
+  }
+
+  get(approvalId: string): HostApproval | undefined {
+    return this.approvals.get(approvalId);
   }
 
   async create(runtimeRequest: RuntimeApprovalRequest): Promise<HostApproval> {
@@ -64,6 +73,9 @@ export class ApprovalGate {
     if (params.decision === "approve" || params.decision === "approve_session") {
       if (!approval.approvable_by_chat || approval.safe_default !== "manual_only") {
         throw new Error(`approval_not_approvable_by_chat: ${approval.kind}`);
+      }
+      if (params.decision === "approve_session" && approval.kind !== "command_execution" && approval.kind !== "exec_command") {
+        throw new Error(`approval_session_scope_not_allowed: ${approval.kind}`);
       }
       if (approval.kind === "file_change" || approval.kind === "apply_patch") {
         if (!approval.diff_hash) {
@@ -169,7 +181,7 @@ export class ApprovalGate {
     const snapshot = `${JSON.stringify(approval, null, 2)}\n`;
     const write = this.writeChain.then(async () => {
       await this.init();
-      await fs.writeFile(filePath, snapshot, "utf8");
+      writeFileInsideRootSync(this.physicalRoot, filePath, snapshot);
     });
     this.writeChain = write.catch(() => undefined);
     await write;
@@ -196,7 +208,7 @@ const COMMAND_APPROVAL_EVIDENCE = ["nonce", "displayed_command_reviewed"];
 
 function approvalPolicyFor(request: RuntimeApprovalRequest, diffHash: string | undefined, trustMode: TrustMode): ApprovalPolicyFields {
   if (request.kind === "file_change" || request.kind === "apply_patch") {
-    if (diffHash) {
+    if (diffHash && diffIsFullyReviewable(request.diff_evidence ?? request.file_changes)) {
       return {
         safe_default: "manual_only",
         approvable_by_chat: true,
@@ -208,13 +220,19 @@ function approvalPolicyFor(request: RuntimeApprovalRequest, diffHash: string | u
     return {
       safe_default: "reject",
       approvable_by_chat: false,
-      blocked_reason: "File or patch approval requires displayed diff evidence and a matching diff hash.",
+      blocked_reason: "File or patch approval requires a complete, non-truncated displayed diff and a matching diff hash. Split oversized changes before approval.",
       required_evidence: [...DIFF_APPROVAL_BLOCKED_EVIDENCE],
       approval_policy_label: "Diff evidence required"
     };
   }
 
   if (request.kind === "command_execution" || request.kind === "exec_command") {
+    if (!commandIsReviewable(request.command)) {
+      return blockedPolicy("Command approval requires the complete command text for review.", "Command review unavailable");
+    }
+    if (commandReviewText(request.command).length > MAX_APPROVAL_COMMAND_CHARS) {
+      return blockedPolicy("Command approval is blocked because the full command does not fit the review surface. Split or shorten it first.", "Command review too large");
+    }
     return {
       safe_default: "manual_only",
       approvable_by_chat: true,
@@ -225,16 +243,7 @@ function approvalPolicyFor(request: RuntimeApprovalRequest, diffHash: string | u
   }
 
   if (request.kind === "permissions") {
-    if (trustMode === "full_machine") {
-      return {
-        safe_default: "manual_only",
-        approvable_by_chat: true,
-        blocked_reason: null,
-        required_evidence: ["nonce", "full_machine_trust_session_active"],
-        approval_policy_label: "Full trust permission approval"
-      };
-    }
-    return blockedPolicy("Permission grants are not approvable from chat. Use a narrower typed Bridge action or ask Codex to revise.", "Permission grant blocked");
+    return blockedPolicy("Permission grants are not reviewable in Godot chat, including full-machine sessions. Use a Codex client that supports this approval scope.", "Permission grant blocked");
   }
 
   if (request.kind === "elicitation") {
@@ -252,6 +261,46 @@ function approvalPolicyFor(request: RuntimeApprovalRequest, diffHash: string | u
   }
 
   return blockedPolicy("This approval type is not approvable from chat.", "Approval blocked");
+}
+
+function diffIsFullyReviewable(value: unknown): boolean {
+  const items = Array.isArray(value)
+    ? value
+    : value && typeof value === "object"
+      ? Object.values(value as Record<string, unknown>)
+      : [];
+  if (items.length === 0 || items.length > MAX_APPROVAL_FILES) {
+    return false;
+  }
+  return items.every((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const record = item as Record<string, unknown>;
+    const diff = typeof record.unified_diff === "string"
+      ? record.unified_diff
+      : typeof record.diff === "string"
+        ? record.diff
+        : "";
+    return diff.length > 0 && diff.split("\n").length <= MAX_APPROVAL_DIFF_LINES_PER_FILE;
+  });
+}
+
+function commandReviewText(command: unknown): string {
+  if (typeof command === "string") {
+    return command;
+  }
+  if (command === undefined || command === null) {
+    return "";
+  }
+  return JSON.stringify(command);
+}
+
+function commandIsReviewable(command: unknown): boolean {
+  return typeof command === "string"
+    ? command.trim().length > 0
+    : Array.isArray(command) && command.length > 0 &&
+      command.every((part) => typeof part === "string" && part.trim().length > 0);
 }
 
 function blockedPolicy(blockedReason: string, label: string): ApprovalPolicyFields {

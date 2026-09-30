@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { resolveCodexCommand } from "../src/codexCommand.js";
+import { hashSchemaTree } from "../src/schemaTree.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -32,7 +33,9 @@ const lock = {
       bytes: bytes.byteLength,
       sha256: crypto.createHash("sha256").update(bytes).digest("hex")
     }];
-  })))
+  }))),
+  // Every generated file, so doctor detects drift outside the core four.
+  tree: await hashSchemaTree(path.join(packageRoot, "schemas"))
 };
 
 await fs.writeFile(path.join(packageRoot, "schemas", "SCHEMA_LOCK.json"), `${JSON.stringify(lock, null, 2)}\n`, "utf8");

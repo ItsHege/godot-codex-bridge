@@ -47,6 +47,7 @@ test("BridgeClient writes addon request and returns timeout when live addon does
   const result = await bridge.sendAddonRequest("capture_viewport_screenshot", {}, 150);
 
   assert.equal(result.status, "timeout");
+  assert.equal((result.error as { code?: string })?.code, "outcome_unknown");
   assert.equal(result.transport, "file_polling");
   assert.equal(result.fallback_reason, "host_rpc_not_configured");
   assert.equal(Array.isArray(result.transport_attempts), true);
@@ -54,6 +55,8 @@ test("BridgeClient writes addon request and returns timeout when live addon does
   assert.equal((result.transport_attempts as Array<{ transport?: string; status?: string }>)[1]?.status, "timeout");
   assert.equal(typeof result.request_path, "string");
   await fs.access(String(result.request_path));
+  const request = JSON.parse(await fs.readFile(String(result.request_path), "utf8")) as { created_at: string; deadline_at: string };
+  assert.ok(Date.parse(request.deadline_at) > Date.parse(request.created_at));
 });
 
 test("BridgeClient returns addon response when present", async () => {
@@ -68,7 +71,7 @@ test("BridgeClient returns addon response when present", async () => {
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
   await fs.writeFile(
     path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
-    JSON.stringify({ status: "ok", data: { screenshot_path: "local.png" } }),
+    JSON.stringify({ request_id: request.request_id, status: "ok", data: { screenshot_path: "local.png" } }),
     "utf8",
   );
 
@@ -144,7 +147,7 @@ test("BridgeClient reports host RPC failure before file polling fallback", async
   await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
   await writeLiveHeartbeat(config.bridgeDir);
   const server = createServer((_request, response) => {
-    response.writeHead(409, { "content-type": "application/json" });
+    response.writeHead(503, { "content-type": "application/json" });
     response.end(JSON.stringify({
       status: "error",
       error: {
@@ -166,7 +169,7 @@ test("BridgeClient reports host RPC failure before file polling fallback", async
     const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
     await fs.writeFile(
       path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
-      JSON.stringify({ status: "succeeded", data: { transport_marker: "file_fallback" } }),
+      JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { transport_marker: "file_fallback" } }),
       "utf8",
     );
 
@@ -186,6 +189,88 @@ test("BridgeClient reports host RPC failure before file polling fallback", async
   }
 });
 
+test("BridgeClient falls back to file polling when the Host is not running", async () => {
+  const config = await makeConfig();
+  await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
+  await writeLiveHeartbeat(config.bridgeDir);
+  // Reserve a port, then close it so the connection is refused like a stopped Host.
+  const placeholder = createServer();
+  await listen(placeholder);
+  const port = (placeholder.address() as { port: number }).port;
+  await close(placeholder);
+  config.hostRpcUrl = `http://127.0.0.1:${port}/bridge/request`;
+
+  const pending = new BridgeClient(config).sendAddonRequest("refresh_context", {}, 1_000);
+  const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
+  const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
+  await fs.writeFile(
+    path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
+    JSON.stringify({ request_id: request.request_id, status: "succeeded", data: {} }),
+    "utf8",
+  );
+  const result = await pending;
+  assert.equal(result.status, "ok");
+  assert.equal(result.transport, "file_polling");
+  assert.equal(result.fallback_reason, "host_rpc_unavailable");
+});
+
+test("BridgeClient does not replay a Host RPC that lost the addon after dispatch", async () => {
+  const config = await makeConfig();
+  await fs.mkdir(config.bridgeDir, { recursive: true });
+  await writeLiveHeartbeat(config.bridgeDir);
+  const server = createServer((_request, response) => {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ status: "error", error: { code: "addon_disconnected", message: "Paired addon disconnected." } }));
+  });
+  await listen(server);
+  config.hostRpcUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/bridge/request`;
+  try {
+    const result = await new BridgeClient(config).sendAddonRequest("refresh_context", {}, 1_000);
+    assert.equal((result.error as { code?: string })?.code, "outcome_unknown");
+    await assert.rejects(fs.readdir(path.join(config.bridgeDir, "requests")));
+  } finally {
+    await close(server);
+  }
+});
+
+test("BridgeClient does not replay an uncertain Host RPC through file polling", async () => {
+  const config = await makeConfig();
+  await fs.mkdir(config.bridgeDir, { recursive: true });
+  await writeLiveHeartbeat(config.bridgeDir);
+  const server = createServer((_request, response) => {
+    response.writeHead(409, { "content-type": "application/json" });
+    response.end(JSON.stringify({ status: "error", error: { code: "outcome_unknown" } }));
+  });
+  await listen(server);
+  const address = server.address() as { port: number };
+  config.hostRpcUrl = `http://127.0.0.1:${address.port}/bridge/request`;
+  try {
+    const result = await new BridgeClient(config).sendAddonRequest("refresh_context", {}, 1_000);
+    assert.equal(result.status, "error");
+    assert.equal((result.error as { code?: string })?.code, "outcome_unknown");
+    assert.equal(typeof result.request_id, "string");
+    await assert.rejects(fs.readdir(path.join(config.bridgeDir, "requests")));
+  } finally {
+    await close(server);
+  }
+});
+
+test("BridgeClient refuses a truncated or mismatched final response", async () => {
+  const config = await makeConfig();
+  await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
+  await writeLiveHeartbeat(config.bridgeDir);
+  for (const body of ["{", JSON.stringify({ request_id: "different", status: "succeeded" })]) {
+    const pending = new BridgeClient(config).sendAddonRequest("refresh_context", {}, 1_000);
+    const requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
+    const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
+    await fs.writeFile(path.join(config.bridgeDir, "responses", `${request.request_id}.json`), body, "utf8");
+    const result = await pending;
+    assert.equal(result.status, "error");
+    assert.equal((result.error as { code?: string })?.code, "invalid_addon_response");
+    await fs.rm(requestPath);
+  }
+});
+
 test("BridgeClient treats contract succeeded addon response as ok", async () => {
   const config = await makeConfig();
   await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
@@ -198,7 +283,7 @@ test("BridgeClient treats contract succeeded addon response as ok", async () => 
   const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { request_id: string };
   await fs.writeFile(
     path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
-    JSON.stringify({ status: "succeeded", data: { context_snapshot_path: "context_snapshot.json" } }),
+    JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { context_snapshot_path: "context_snapshot.json" } }),
     "utf8",
   );
 

@@ -272,23 +272,7 @@ $result = [ordered]@{
 try {
   $healthUri = "http://127.0.0.1:$Port/health"
   if ($AddonStartsHost) {
-    if (-not (Test-Path -LiteralPath $hostConfigPath)) {
-      throw "Addon auto-start config not found: $hostConfigPath. Run scripts\install_addon.ps1 with -Apply -Replace first."
-    }
-    $hostConfig = Get-Content -Raw -LiteralPath $hostConfigPath | ConvertFrom-Json
-    $result.host_config_path = $hostConfigPath
-    $result.host_config_runtime = [string]$hostConfig.runtime
-    $result.host_config_port = [int]$hostConfig.port
-    if ([int]$hostConfig.port -ne $Port) {
-      throw "host_config.json port $($hostConfig.port) does not match validation port $Port."
-    }
-    if ([string]$hostConfig.runtime -ne $Runtime) {
-      throw "host_config.json runtime $($hostConfig.runtime) does not match validation runtime $Runtime."
-    }
-    $existingListeners = @(Get-ListeningProcessIds $Port)
-    if ($existingListeners.Count -gt 0) {
-      throw "Port $Port is already listening before auto-start validation: $($existingListeners -join ', '). Close the existing Codex Host first."
-    }
+    throw "AddonStartsHost validation is retired because project-local host_config.json is not executable authority. Start the Host from the trusted installation and run without -AddonStartsHost."
   } else {
     Push-Location $hostRoot
     npm run build | Write-Output
@@ -406,7 +390,7 @@ try {
     $result.usable_screen_rect = $layout.response.data.usable_screen_rect
     $result.window_inside_usable_screen = [bool]$layout.response.data.window_inside_usable_screen
   }
-  if ($result.host_config_status -ne "ok") {
+  if ($result.host_config_status -ne "manual_start_required") {
     throw "Godot addon host_config status is '$($result.host_config_status)': $($result.host_config_message)"
   }
   if ([string]$result.host_config_runtime -ne $Runtime) {

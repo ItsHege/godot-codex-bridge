@@ -5,10 +5,29 @@ import path from "node:path";
 import test from "node:test";
 import WebSocket from "ws";
 import { request as httpRequest } from "node:http";
+import { createHmac } from "node:crypto";
 import { loadConfig } from "../src/config.js";
 import { MockCodexRuntime } from "../src/codexRuntime.js";
 import { GodotSocketServer } from "../src/godotSocketServer.js";
 import { HostController } from "../src/hostController.js";
+
+const TEST_PAIR_SECRET = "a".repeat(64);
+
+test("installation launch nonce binds HTTP health without changing ordinary Host status", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const nonce = "a".repeat(64);
+  const server = new GodotSocketServer("127.0.0.1", 0, controller, nonce);
+  await server.start();
+  try {
+    const health = await (await fetch(`http://127.0.0.1:${server.addressPort()}/health`)).json() as Record<string, unknown>;
+    assert.equal(health.launch_proof, createHmac("sha256", Buffer.from(nonce, "hex")).update("godot-codex-bridge-host-health-v1").digest("hex"));
+    assert.equal(Object.hasOwn(health, "launch_nonce"), false);
+    assert.equal(health.runtime, "mock");
+    assert.equal(Object.hasOwn(controller.status(), "launch_nonce"), false);
+  } finally {
+    await server.stop();
+  }
+});
 
 test("Godot socket server accepts health and project attach requests", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-host-ws-"));
@@ -17,12 +36,13 @@ test("Godot socket server accepts health and project attach requests", async () 
   const port = 0;
   const config = loadConfig(["--runtime", "mock", "--port", String(port)]);
   const controller = new HostController(config, new MockCodexRuntime());
-  const server = new GodotSocketServer("127.0.0.1", port, controller);
+  const server = new GodotSocketServer("127.0.0.1", port, controller, "", TEST_PAIR_SECRET);
   await server.start();
   const actualPort = server.addressPort();
 
   const client = await openWebSocket(`ws://127.0.0.1:${actualPort}`);
   try {
+    await pairClient(client);
     client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "host.health" }));
     const health = await client.nextResponse(1);
     assert.equal(health.id, 1);
@@ -43,7 +63,7 @@ test("Godot socket server accepts health and project attach requests", async () 
   }
 });
 
-test("Godot socket server relays bridge RPC requests to the connected addon", async () => {
+test("Godot socket server disables unauthenticated HTTP bridge RPC even with a paired addon", async () => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-host-bridge-rpc-"));
   await fs.writeFile(path.join(projectRoot, "project.godot"), "[application]\n", "utf8");
   const bridgeDir = path.join(projectRoot, ".godot", "godot_codex_bridge");
@@ -51,12 +71,13 @@ test("Godot socket server relays bridge RPC requests to the connected addon", as
   const port = 0;
   const config = loadConfig(["--runtime", "mock", "--port", String(port)]);
   const controller = new HostController(config, new MockCodexRuntime());
-  const server = new GodotSocketServer("127.0.0.1", port, controller);
+  const server = new GodotSocketServer("127.0.0.1", port, controller, "", TEST_PAIR_SECRET);
   await server.start();
   const actualPort = server.addressPort();
 
   const addon = await openWebSocket(`ws://127.0.0.1:${actualPort}`);
   try {
+    await pairClient(addon);
     addon.socket.send(JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -82,30 +103,122 @@ test("Godot socket server relays bridge RPC requests to the connected addon", as
       })
     });
 
-    const relay = await addon.nextNotification("bridge.addon_request");
-    assert.equal(relay.params.request_id, "bridge-rpc-test");
-    addon.socket.send(JSON.stringify({
-      jsonrpc: "2.0",
-      method: "bridge.addon_response",
-      params: {
-        request_id: "bridge-rpc-test",
-        response: {
-          request_id: "bridge-rpc-test",
-          type: "refresh_context",
-          status: "completed",
-          data: { generated_at: "now" }
-        }
-      }
-    }));
-
     const httpResponse = await pendingHttp;
-    assert.equal(httpResponse.status, 200);
+    assert.equal(httpResponse.status, 503);
     const result = await httpResponse.json() as any;
-    assert.equal(result.status, "ok");
-    assert.equal(result.transport, "websocket_rpc");
-    assert.equal(result.response.status, "completed");
+    assert.equal(result.error.code, "bridge_rpc_unavailable");
   } finally {
     addon.socket.close();
+    await server.stop();
+  }
+});
+
+test("unpaired native clients cannot read status, attach projects, set trust, or answer addon requests", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const server = new GodotSocketServer("127.0.0.1", 0, controller);
+  await server.start();
+  const client = await openWebSocket(`ws://127.0.0.1:${server.addressPort()}`);
+  try {
+    const prompt = await client.nextNotification("host.pair_required");
+    assert.equal(prompt.params.protocol, "godot-codex-bridge/pair-v2");
+    for (const [id, method, params] of [
+      [1, "host.health", {}],
+      [2, "project.attach", { project_root: os.tmpdir() }],
+      [3, "session.trust.set", { mode: "full_machine" }],
+      [4, "approval.respond", { approval_id: "x", decision: "approve" }],
+      [5, "host.shutdown", {}],
+      [6, "bridge.addon_response", { request_id: "x", response: { status: "completed" } }],
+    ] as const) {
+      client.socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+      const denied = await client.nextResponse(id);
+      assert.equal(denied.error.message, "pairing_required");
+    }
+    client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "host.pair", params: { client_nonce: "bad" } }));
+    assert.equal((await client.nextResponse(7)).error.message, "invalid_pairing_nonce");
+    assert.equal(controller.status().activeProject, undefined);
+  } finally {
+    client.socket.terminate();
+    await server.stop();
+  }
+});
+
+test("only one socket can be paired and a reconnect must pair again", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const server = new GodotSocketServer("127.0.0.1", 0, controller, "", TEST_PAIR_SECRET);
+  await server.start();
+  const url = `ws://127.0.0.1:${server.addressPort()}`;
+  const first = await openWebSocket(url);
+  try {
+    await pairClient(first);
+    const rejected = await openWebSocket(url);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("second socket was not closed")), 1_000);
+      rejected.socket.once("close", () => { clearTimeout(timer); resolve(); });
+    });
+    first.socket.close();
+    await new Promise<void>((resolve) => first.socket.once("close", resolve));
+    const resumed = await openWebSocket(url);
+    try {
+      await resumed.nextNotification("host.pair_required");
+      resumed.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "host.health" }));
+      assert.equal((await resumed.nextResponse(1)).error.message, "pairing_required");
+      await pairClient(resumed, false);
+    } finally {
+      resumed.socket.terminate();
+    }
+  } finally {
+    first.socket.terminate();
+    await server.stop();
+  }
+});
+
+test("pair challenge binds both proofs to the socket and rejects an incorrect completion", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const server = new GodotSocketServer("127.0.0.1", 0, controller, "", TEST_PAIR_SECRET);
+  await server.start();
+  const client = await openWebSocket(`ws://127.0.0.1:${server.addressPort()}`);
+  try {
+    await client.nextNotification("host.pair_required");
+    const clientNonce = "b".repeat(64);
+    client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "host.pair", params: { client_nonce: clientNonce } }));
+    const challenge = (await client.nextResponse(1)).result;
+    assert.match(challenge.server_nonce, /^[a-f0-9]{64}$/);
+    assert.equal(challenge.server_proof, createHmac("sha256", Buffer.from(TEST_PAIR_SECRET, "hex"))
+      .update(`host:${clientNonce}:${challenge.server_nonce}`).digest("hex"));
+    assert.equal(Object.hasOwn(challenge, "paired"), false);
+    client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "host.health" }));
+    assert.equal((await client.nextResponse(2)).error.message, "pairing_required");
+    client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "host.pair_complete", params: { client_proof: "0".repeat(64) } }));
+    assert.equal((await client.nextResponse(3)).error.message, "pairing_failed");
+    await new Promise<void>((resolve) => client.socket.once("close", resolve));
+  } finally {
+    client.socket.terminate();
+    await server.stop();
+  }
+});
+
+test("another unpaired socket cannot complete a different socket's challenge", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const server = new GodotSocketServer("127.0.0.1", 0, controller, "", TEST_PAIR_SECRET);
+  await server.start();
+  const url = `ws://127.0.0.1:${server.addressPort()}`;
+  const first = await openWebSocket(url);
+  const second = await openWebSocket(url);
+  try {
+    await first.nextNotification("host.pair_required");
+    await second.nextNotification("host.pair_required");
+    const clientNonce = "d".repeat(64);
+    first.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "host.pair", params: { client_nonce: clientNonce } }));
+    const challenge = (await first.nextResponse(1)).result;
+    const proof = createHmac("sha256", Buffer.from(TEST_PAIR_SECRET, "hex"))
+      .update(`addon:${clientNonce}:${challenge.server_nonce}`).digest("hex");
+    second.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "host.pair_complete", params: { client_proof: proof } }));
+    assert.equal((await second.nextResponse(2)).error.message, "pairing_failed");
+    first.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "host.pair_complete", params: { client_proof: proof } }));
+    assert.equal((await first.nextResponse(3)).result.paired, true);
+  } finally {
+    first.socket.terminate();
+    second.socket.terminate();
     await server.stop();
   }
 });
@@ -196,6 +309,21 @@ type TestClient = {
   nextResponse: (id: number) => Promise<any>;
   nextNotification: (method: string) => Promise<any>;
 };
+
+async function pairClient(client: TestClient, awaitPrompt = true): Promise<void> {
+  if (awaitPrompt) await client.nextNotification("host.pair_required");
+  const clientNonce = "c".repeat(64);
+  client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 100, method: "host.pair", params: { client_nonce: clientNonce } }));
+  const challenge = (await client.nextResponse(100)).result;
+  assert.match(challenge.server_nonce, /^[a-f0-9]{64}$/);
+  assert.equal(challenge.server_proof, createHmac("sha256", Buffer.from(TEST_PAIR_SECRET, "hex"))
+    .update(`host:${clientNonce}:${challenge.server_nonce}`).digest("hex"));
+  const clientProof = createHmac("sha256", Buffer.from(TEST_PAIR_SECRET, "hex"))
+    .update(`addon:${clientNonce}:${challenge.server_nonce}`).digest("hex");
+  client.socket.send(JSON.stringify({ jsonrpc: "2.0", id: 101, method: "host.pair_complete", params: { client_proof: clientProof } }));
+  assert.equal((await client.nextResponse(101)).result.paired, true);
+  assert.equal((await client.nextNotification("host.status")).params.state, "ready");
+}
 
 function openWebSocket(url: string): Promise<TestClient> {
   const queue: any[] = [];

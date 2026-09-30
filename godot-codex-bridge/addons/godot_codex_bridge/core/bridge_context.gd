@@ -37,6 +37,8 @@ var record_editor_action: Callable = Callable()
 
 ## Callable() -> void. Wraps plugin._ensure_bridge_dirs.
 var ensure_bridge_dirs: Callable = Callable()
+var ensure_safe_directory: Callable = Callable()
+var validate_safe_path: Callable = Callable()
 var append_chat_system: Callable = Callable()
 var write_json_file: Callable = Callable()
 var current_scene_path: Callable = Callable()
@@ -73,6 +75,22 @@ func record_action(action: String, status: String, data: Dictionary) -> void:
 func ensure_dirs() -> void:
 	if ensure_bridge_dirs.is_valid():
 		ensure_bridge_dirs.call()
+
+
+func ensure_safe_dir(path: String) -> Dictionary:
+	if ensure_safe_directory.is_valid():
+		var result: Variant = ensure_safe_directory.call(path)
+		if typeof(result) == TYPE_DICTIONARY:
+			return result
+	return err("path_guard_unavailable", "Bridge path guard is unavailable.")
+
+
+func validate_path(path: String, allow_missing_tail := false) -> Dictionary:
+	if validate_safe_path.is_valid():
+		var result: Variant = validate_safe_path.call(path, allow_missing_tail)
+		if typeof(result) == TYPE_DICTIONARY:
+			return result
+	return err("path_guard_unavailable", "Bridge path guard is unavailable.")
 
 
 func append_status(message: String) -> void:

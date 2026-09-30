@@ -71,14 +71,13 @@ const PROFILES := [
 	{
 		"id": "scene_edit",
 		"label": "Scene Edit",
-		"description": "Diagnose plus UndoRedo-backed scene edits, selected-node fixes, animation preview and scene run. No save.",
+		"description": "Diagnose plus UndoRedo-backed scene edits, animation preview and scene run. No save.",
 		"enabled": [
 			"allow_screenshots",
 			"allow_ai_markers",
 			"allow_open_scene",
 			"allow_run_current_scene",
 			# P11 playtest input remains manual-only until the safety sign-off slice.
-			"allow_fix_selected_node",
 			"allow_editor_navigation",
 			"allow_editor_inspect",
 			"allow_editor_diagnostics",
@@ -92,22 +91,20 @@ const PROFILES := [
 	},
 	{
 		"id": "save",
-		"label": "Save",
-		"description": "Scene Edit plus clear Bridge diagnostics and explicit scene save. File diff/apply approvals still remain separate.",
+		"label": "Edit + Diagnostics",
+		"description": "Scene Edit plus clear Bridge diagnostics. Agent-driven scene save remains unavailable; save in the Godot UI.",
 		"enabled": [
 			"allow_screenshots",
 			"allow_ai_markers",
 			"allow_open_scene",
 			"allow_run_current_scene",
 			# P11 playtest input remains manual-only until the safety sign-off slice.
-			"allow_fix_selected_node",
 			"allow_editor_navigation",
 			"allow_editor_inspect",
 			"allow_editor_diagnostics",
 			"allow_clear_diagnostics",
 			"allow_animation_preview",
 			"allow_scene_edits",
-			"allow_scene_save",
 			"allow_bridge_notes",
 			"allow_send_context",
 			"allow_codex_chat",
@@ -117,21 +114,19 @@ const PROFILES := [
 	{
 		"id": "full_trust",
 		"label": "Full Trust",
-		"description": "All addon permissions for this project. Codex Host full-machine Trust Session is still controlled by the separate Trust toggle.",
+		"description": "All currently available addon permissions for this project. Disabled save and selected-node fix routes stay off. Codex Host full-machine Trust Session is still controlled by the separate Trust toggle.",
 		"enabled": [
 			"allow_screenshots",
 			"allow_ai_markers",
 			"allow_open_scene",
 			"allow_run_current_scene",
 			# P11 playtest input remains manual-only until the safety sign-off slice.
-			"allow_fix_selected_node",
 			"allow_editor_navigation",
 			"allow_editor_inspect",
 			"allow_editor_diagnostics",
 			"allow_clear_diagnostics",
 			"allow_animation_preview",
 			"allow_scene_edits",
-			"allow_scene_save",
 			"allow_bridge_notes",
 			"allow_send_context",
 			"allow_codex_chat",

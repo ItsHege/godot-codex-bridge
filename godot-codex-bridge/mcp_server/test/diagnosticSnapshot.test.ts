@@ -7,8 +7,10 @@ import test from "node:test";
 import { createDiagnosticSnapshot } from "../src/diagnosticSnapshot.js";
 
 test("createDiagnosticSnapshot writes local diagnostic artifact", async () => {
-  const bridgeDir = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-diagnostic-"));
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-diagnostic-"));
+  const bridgeDir = path.join(projectRoot, ".godot", "godot_codex_bridge");
   const result = await createDiagnosticSnapshot(
+    projectRoot,
     bridgeDir,
     {
       status: "ok",
@@ -25,8 +27,9 @@ test("createDiagnosticSnapshot writes local diagnostic artifact", async () => {
 });
 
 test("createDiagnosticSnapshot returns diagnostic error unchanged", async () => {
-  const bridgeDir = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-diagnostic-error-"));
-  const result = await createDiagnosticSnapshot(bridgeDir, {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-diagnostic-error-"));
+  const bridgeDir = path.join(projectRoot, ".godot", "godot_codex_bridge");
+  const result = await createDiagnosticSnapshot(projectRoot, bridgeDir, {
     status: "not_found",
     error: { code: "scene_tree_missing" },
   });

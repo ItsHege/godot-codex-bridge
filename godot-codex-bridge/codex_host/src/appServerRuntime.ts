@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -15,6 +17,7 @@ import { resolveCodexCommand } from "./codexCommand.js";
 import { buildBridgeToolsRegistrationPlan } from "./bridgeToolsRegistration.js";
 import type { CodexRuntimeAdapter, RuntimeSandboxMode, RuntimeThreadHandle, RuntimeThreadOptions, RuntimeTurnInput } from "./codexRuntime.js";
 import { event } from "./codexRuntime.js";
+import { ensureDirectoryInsideRootSync, writeFileInsideRootSync } from "./physicalPath.js";
 import type {
   BridgeToolsEnableResult,
   BridgeToolsRegistrationPlan,
@@ -57,6 +60,10 @@ type RuntimeNotification =
         request_id: JsonRpcId;
         reason: string;
       };
+    }
+  | {
+      method: "godot/runtimeFailed";
+      params: { threadId: string; turnId: string; message: string };
     };
 
 type PendingServerRequest = {
@@ -69,6 +76,16 @@ type PendingServerRequest = {
 
 export function appServerListenUrl(host: string, port: number): string {
   return `ws://${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
+export function codexChildEnvironment(parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const childEnv = { ...parent };
+  for (const key of Object.keys(childEnv)) {
+    if (["GODOT_CODEX_HOST_PAIR_SECRET", "GODOT_CODEX_HOST_LAUNCH_NONCE"].includes(key.toUpperCase())) {
+      delete childEnv[key];
+    }
+  }
+  return childEnv;
 }
 
 const FALLBACK_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
@@ -99,6 +116,8 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
   private readonly itemDiffs = new Map<string, unknown>();
   private readonly itemPhases = new Map<string, string>();
   private shuttingDown = false;
+  private activeTurn: { threadId: string; turnId: string } | null = null;
+  private lastProcessFailure: string | null = null;
 
   constructor(private readonly options: AppServerRuntimeOptions) {}
 
@@ -193,7 +212,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     }
 
     const previousConfig = await this.readExistingBridgeToolsConfig(plan.serverName, project.projectRoot).catch(() => null);
-    await fs.mkdir(evidenceDir, { recursive: true });
+    ensureDirectoryInsideRootSync(project.projectRoot, evidenceDir);
     const evidencePath = path.join(evidenceDir, `enable-bridge-tools-${Date.now()}.json`);
     const beforeEvidence = {
       created_at: new Date().toISOString(),
@@ -204,7 +223,21 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       previous_config: previousConfig ?? null,
       new_config: plan.mcpServerConfig
     };
-    await fs.writeFile(evidencePath, `${JSON.stringify(beforeEvidence, null, 2)}\n`, "utf8");
+    if (bridgeMcpOverrideArgs(this.bridgeProject).length > 0 && this.bridgeProject?.projectRoot === project.projectRoot) {
+      // Already bound to this project by the launch-time override. Writing the
+      // user's global Codex config would repoint every other Codex session
+      // (and other games) at this project, so leave it untouched.
+      writeFileInsideRootSync(project.projectRoot, evidencePath, `${JSON.stringify({ ...beforeEvidence, binding: "launch_override", global_config_written: false }, null, 2)}\n`);
+      return {
+        applied: true,
+        reloaded: false,
+        evidencePath,
+        plan: withExistingConfig(plan, previousConfig),
+        inventory: await this.waitForBridgeToolsInventory(project),
+        checkedAt: new Date().toISOString()
+      };
+    }
+    writeFileInsideRootSync(project.projectRoot, evidencePath, `${JSON.stringify(beforeEvidence, null, 2)}\n`);
 
     await this.request("config/value/write", {
       keyPath: plan.keyPath,
@@ -243,6 +276,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     const response = await this.request<TurnStartResponse>("turn/start", params);
 
     const turnId = response.turn.id;
+    this.activeTurn = { threadId: input.threadId, turnId };
     yield event("turn.started", {
       thread_id: input.threadId,
       turn_id: turnId
@@ -255,6 +289,9 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       }
       yield mapped;
       if (mapped.method === "turn.completed" || mapped.method === "turn.interrupted" || mapped.method === "error") {
+        if (this.activeTurn?.threadId === input.threadId && this.activeTurn.turnId === turnId) {
+          this.activeTurn = null;
+        }
         return;
       }
       if (this.notifications.length > this.options.backpressureLimit) {
@@ -263,6 +300,13 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
           limit: this.options.backpressureLimit
         });
       }
+    }
+    if (this.activeTurn?.threadId === input.threadId && this.activeTurn.turnId === turnId) {
+      this.activeTurn = null;
+      yield event("error", {
+        thread_id: input.threadId, turn_id: turnId, recoverable: true,
+        message: "codex app-server notification stream ended before the turn completed",
+      });
     }
   }
 
@@ -291,6 +335,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    this.failActiveTurn("codex app-server shut down");
     this.socket?.close();
     this.socket = null;
     this.initialized = false;
@@ -337,18 +382,55 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     }
   }
 
+  private bridgeProject: { projectRoot: string; bridgeDir: string } | null = null;
+
+  /**
+   * Bind Codex's godot_codex_bridge MCP server to the attached project. A
+   * global Codex config may point it at another game; this launch-time
+   * override always wins. A running app-server for another project is
+   * restarted on next use so it picks up the new binding.
+   */
+  setBridgeProject(projectRoot: string, bridgeDir: string): void {
+    if (this.bridgeProject?.projectRoot === projectRoot && this.bridgeProject.bridgeDir === bridgeDir) return;
+    this.bridgeProject = { projectRoot, bridgeDir };
+    if (!this.proc) return;
+    this.shuttingDown = true;
+    this.socket?.close();
+    this.socket = null;
+    this.initialized = false;
+    this.connectionPromise = null;
+    this.failPendingRequests(new Error("app_server_rebinding_project"));
+    this.invalidateServerRequests(() => true, "runtime_rebinding_project");
+    this.terminateProcess();
+  }
+
   private async startProcess(): Promise<void> {
     if (this.proc && !this.proc.killed) {
       return;
     }
     this.shuttingDown = false;
+    this.lastProcessFailure = null;
     const listen = appServerListenUrl(this.options.host, this.options.port);
-    const command = resolveCodexCommand(this.options.codexBin, ["app-server", "--listen", listen]);
-    this.proc = spawn(command.file, command.args, {
+    const override = bridgeMcpOverrideArgs(this.bridgeProject);
+    let command;
+    try {
+      command = resolveCodexCommand(this.options.codexBin, [...override, "app-server", "--listen", listen]);
+    } catch (error) {
+      if (override.length === 0) throw error;
+      // The npm cmd.exe fallback cannot carry a config override safely.
+      command = resolveCodexCommand(this.options.codexBin, ["app-server", "--listen", listen]);
+      this.notifications.push({
+        method: "warning",
+        params: { threadId: null, message: "Godot Bridge tools could not be bound to this project (Codex npm fallback). Set GODOT_CODEX_HOST_CODEX_BIN to codex.exe." }
+      } as ServerNotification);
+    }
+    const proc = spawn(command.file, command.args, {
       stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
+      windowsHide: true,
+      env: codexChildEnvironment(process.env)
     });
-    this.proc.stderr?.on("data", (chunk) => {
+    this.proc = proc;
+    proc.stderr?.on("data", (chunk) => {
       const text = String(chunk).trim();
       if (text) {
         this.notifications.push({
@@ -360,20 +442,25 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
         } as ServerNotification);
       }
     });
-    this.proc.on("exit", (code, signal) => {
-      this.proc = null;
-      this.initialized = false;
-      this.socket = null;
-      this.failPendingRequests(new Error(`codex app-server exited with code ${code ?? "null"} signal ${signal ?? "null"}`));
-      this.invalidateServerRequests(() => true, "process_exited");
-      this.notifications.push({
-        method: "warning",
-        params: {
-          threadId: null,
-          message: `codex app-server exited with code ${code ?? "null"} signal ${signal ?? "null"}`
-        }
-      } as ServerNotification);
+    proc.on("error", (error) => {
+      this.handleProcessFailure(proc, `codex app-server spawn failed: ${error.message}`);
     });
+    proc.on("exit", (code, signal) => {
+      this.handleProcessFailure(proc, `codex app-server exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+    });
+  }
+
+  private handleProcessFailure(proc: ChildProcess, message: string): void {
+    if (this.proc !== proc) return;
+    this.proc = null;
+    this.lastProcessFailure = message;
+    this.initialized = false;
+    this.socket?.close();
+    this.socket = null;
+    this.failPendingRequests(new Error(message));
+    this.invalidateServerRequests(() => true, "process_exited");
+    this.failActiveTurn(message);
+    this.notifications.push({ method: "warning", params: { threadId: null, message } } as ServerNotification);
   }
 
   private async connectSocket(): Promise<void> {
@@ -384,24 +471,32 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
     const deadline = Date.now() + 10_000;
     let lastError: Error | null = null;
     while (Date.now() < deadline) {
+      if (!this.proc) {
+        throw new Error(this.lastProcessFailure ?? "codex app-server process stopped before connecting");
+      }
       try {
         this.initialized = false;
-        this.socket = await openWebSocket(url);
-        this.socket.on("message", (raw) => this.handleMessage(String(raw)));
-        this.socket.on("close", () => {
+        const socket = await openWebSocket(url);
+        this.socket = socket;
+        socket.on("message", (raw) => this.handleMessage(String(raw)));
+        socket.on("close", () => {
+          if (this.socket !== socket) return;
           this.initialized = false;
           this.socket = null;
           this.failPendingRequests(new Error("app_server_socket_closed"));
           this.invalidateServerRequests(() => true, "transport_closed");
+          this.failActiveTurn("codex app-server transport closed");
           if (!this.shuttingDown) {
             this.terminateProcess();
           }
         });
-        this.socket.on("error", (error) => {
+        socket.on("error", (error) => {
+          if (this.socket !== socket) return;
           this.initialized = false;
           this.socket = null;
           this.failPendingRequests(error instanceof Error ? error : new Error(String(error)));
           this.invalidateServerRequests(() => true, "transport_error");
+          this.failActiveTurn(`codex app-server transport error: ${error instanceof Error ? error.message : String(error)}`);
           if (!this.shuttingDown) {
             this.terminateProcess();
           }
@@ -418,9 +513,16 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
 
   private terminateProcess(): void {
     if (this.proc && !this.proc.killed) {
-      this.proc.kill();
+      terminateProcessTree(this.proc);
     }
     this.proc = null;
+  }
+
+  private failActiveTurn(message: string): void {
+    const active = this.activeTurn;
+    if (!active) return;
+    this.activeTurn = null;
+    this.notifications.push({ method: "godot/runtimeFailed", params: { ...active, message } });
   }
 
   private request<T = unknown>(method: string, params: unknown): Promise<T> {
@@ -513,28 +615,24 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       return;
     }
 
-    const params = request.params as Record<string, unknown>;
-    if (request.method === "item/commandExecution/requestApproval" || request.method === "item/permissions/requestApproval") {
-      const unsupportedScope = params.networkApprovalContext != null
-        ? "managed network access"
-        : params.kind != null && params.kind !== "command"
-          ? "terminal input or an unknown command action"
-          : params.environmentId != null
-            ? "an explicit execution environment"
-            : null;
-      if (unsupportedScope) {
-        this.sendServerResponse(request.id, responseForApproval(request.method, "reject", params));
-        this.notifications.push({
-          method: "warning",
-          params: {
-            threadId: typeof params.threadId === "string" ? params.threadId : null,
-            message: `Approval declined: ${unsupportedScope} cannot yet be faithfully reviewed in Godot chat. Use a Codex client that supports this approval scope.`,
-          },
-        } as ServerNotification);
-        return;
-      }
+    const params = objectValue(request.params);
+    const unsupportedScope = unsupportedApprovalScope(request.method, params);
+    if (unsupportedScope) {
+      this.sendServerResponse(request.id, responseForApproval(request.method, "reject", params));
+      this.notifications.push({
+        method: "warning",
+        params: {
+          threadId: typeof params?.threadId === "string" ? params.threadId : typeof params?.conversationId === "string" ? params.conversationId : null,
+          message: `Approval declined: ${unsupportedScope}. Use a Codex client that supports this approval scope.`,
+        },
+      } as ServerNotification);
+      return;
     }
 
+    if (!params) {
+      this.sendServerError(request.id, "invalid_server_request_params", request.method);
+      return;
+    }
     const requestKey = serverRequestKey(request.id);
     if (this.pendingServerRequestIds.has(requestKey)) {
       this.sendServerError(request.id, "duplicate_server_request_id", request.method);
@@ -565,7 +663,7 @@ export class AppServerRuntime implements CodexRuntimeAdapter {
       params: {
         runtime_approval_id: runtimeApprovalId,
         kind: approvalKindFor(request.method),
-        thread_id: typeof params.threadId === "string" ? params.threadId : undefined,
+        thread_id: typeof params.threadId === "string" ? params.threadId : typeof params.conversationId === "string" ? params.conversationId : undefined,
         turn_id: typeof params.turnId === "string" ? params.turnId : undefined,
         item_id: typeof (params.itemId ?? params.callId) === "string" ? String(params.itemId ?? params.callId) : undefined,
         reason: params.reason === undefined ? params.message === undefined ? null : String(params.message) : String(params.reason),
@@ -807,6 +905,9 @@ function mapServerNotification(
   itemPhases: Map<string, string>
 ): HostEvent | null {
   switch (notification.method) {
+    case "godot/runtimeFailed":
+      if (notification.params.threadId !== threadId || notification.params.turnId !== turnId) return null;
+      return event("error", { thread_id: threadId, turn_id: turnId, recoverable: true, message: notification.params.message });
     case "godot/approvalRequested":
       return event("approval.requested", notification.params as unknown as Record<string, unknown>);
     case "godot/approvalInvalidated":
@@ -954,7 +1055,109 @@ function approvalKindFor(method: string): RuntimeApprovalKind {
   }
 }
 
+/**
+ * Stop the Codex child and its descendants. On Windows the npm fallback runs
+ * Codex under cmd.exe, and ChildProcess.kill() would stop only that shim.
+ */
+/** `-c` override that defines godot_codex_bridge for the attached project. */
+export function bridgeMcpOverrideArgs(
+  project: { projectRoot: string; bridgeDir: string } | null,
+  mcpEntry: string = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "mcp_server", "dist", "src", "index.js"),
+  nodeExecutable: string = process.execPath,
+  exists: (file: string) => boolean = existsSync,
+): string[] {
+  if (!project || !exists(mcpEntry)) return [];
+  // JSON string literals are valid TOML basic strings.
+  const q = (value: string) => JSON.stringify(value);
+  const table = `{command=${q(nodeExecutable)},args=[${q(mcpEntry)}],env={GODOT_CODEX_BRIDGE_PROJECT_ROOT=${q(project.projectRoot)},GODOT_CODEX_BRIDGE_DIR=${q(project.bridgeDir)}}}`;
+  return ["-c", `mcp_servers.godot_codex_bridge=${table}`];
+}
+
+export function terminateProcessTree(
+  proc: Pick<ChildProcess, "pid" | "kill">,
+  platform: NodeJS.Platform = process.platform,
+  runTaskkill: (file: string, args: string[]) => { status: number | null } = (file, args) =>
+    spawnSync(file, args, { stdio: "ignore", windowsHide: true, timeout: 5_000 }),
+): void {
+  if (platform === "win32" && proc.pid) {
+    // Absolute System32 path: never resolve taskkill through PATH.
+    const taskkill = path.win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+    const result = runTaskkill(taskkill, ["/PID", String(proc.pid), "/T", "/F"]);
+    if (result.status === 0) {
+      return;
+    }
+  }
+  proc.kill();
+}
+
+const CURRENT_COMMAND_FIELDS = new Set([
+  "kind", "threadId", "turnId", "itemId", "startedAtMs", "approvalId", "environmentId",
+  "reason", "networkApprovalContext", "command", "cwd", "commandActions",
+  "proposedExecpolicyAmendment", "proposedNetworkPolicyAmendments",
+]);
+const LEGACY_COMMAND_FIELDS = new Set(["conversationId", "callId", "approvalId", "command", "cwd", "reason", "parsedCmd"]);
+const CURRENT_FILE_FIELDS = new Set(["threadId", "turnId", "itemId", "startedAtMs", "reason", "grantRoot"]);
+const LEGACY_PATCH_FIELDS = new Set(["conversationId", "callId", "fileChanges", "reason", "grantRoot"]);
+
+/** One fail-closed scope check for intake and final response construction. */
+export function unsupportedApprovalScope(method: string, rawParams: unknown): string | null {
+  if (method === "item/permissions/requestApproval") {
+    return "permission grants are not reviewable in Godot chat";
+  }
+  const params = objectValue(rawParams);
+  if (!params) return "approval parameters are required";
+  if (method.startsWith("item/") && method.endsWith("/requestApproval")) {
+    if (!["threadId", "turnId", "itemId"].every((key) => typeof params[key] === "string" && String(params[key]).length > 0)) {
+      return "approval thread, turn, and item identifiers are required";
+    }
+  }
+  if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {
+    if (method === "execCommandApproval") {
+      if (typeof params.conversationId !== "string" || !params.conversationId || typeof params.callId !== "string" || !params.callId) {
+        return "legacy approval conversation and callback identifiers are required";
+      }
+      const extra = Object.keys(params).find((key) => !LEGACY_COMMAND_FIELDS.has(key));
+      if (extra) return `unsupported legacy command approval field: ${extra}`;
+    } else {
+      const extra = Object.keys(params).find((key) => !CURRENT_COMMAND_FIELDS.has(key));
+      if (extra) return `unsupported command approval field: ${extra}`;
+    }
+    if (params.kind != null && params.kind !== "command") return "terminal input or an unknown command action";
+    if (params.networkApprovalContext != null || params.proposedNetworkPolicyAmendments != null) return "managed network access";
+    // A proposed exec-policy amendment is only an offer: this Host never answers
+    // with acceptWithExecpolicyAmendment, so approving accepts this one command.
+    if (params.environmentId != null) return "an explicit execution environment";
+    if (params.writeStdin != null) return "terminal input";
+    if (method === "execCommandApproval") {
+      if (!Array.isArray(params.command) || params.command.length === 0 ||
+        !params.command.every((part) => typeof part === "string" && part.trim().length > 0)) {
+        return "a reviewable command is required";
+      }
+    } else if (typeof params.command !== "string" || params.command.trim().length === 0) {
+      return "a reviewable command is required";
+    }
+  }
+  if (method === "item/fileChange/requestApproval" || method === "applyPatchApproval") {
+    if (method === "applyPatchApproval" &&
+      (typeof params.conversationId !== "string" || !params.conversationId || typeof params.callId !== "string" || !params.callId)) {
+      return "legacy patch conversation and callback identifiers are required";
+    }
+    const allowed = method === "applyPatchApproval" ? LEGACY_PATCH_FIELDS : CURRENT_FILE_FIELDS;
+    const extra = Object.keys(params).find((key) => !allowed.has(key));
+    if (extra) return `unsupported file approval field: ${extra}`;
+    if (params.grantRoot != null) return "a persistent write root grant";
+  }
+  return null;
+}
+
 export function responseForApproval(method: string, decision: "approve" | "approve_session" | "reject" | "revise" | "expired", rawParams?: unknown, note = ""): unknown {
+  if (decision === "approve" || decision === "approve_session") {
+    const unsupported = unsupportedApprovalScope(method, rawParams);
+    if (unsupported) throw new Error(`unsupported_approval_scope: ${unsupported}`);
+  }
+  if (decision === "approve_session" && method !== "item/commandExecution/requestApproval" && method !== "execCommandApproval") {
+    throw new Error(`approval_session_scope_not_allowed: ${method}`);
+  }
   const accepted = decision === "approve" || decision === "approve_session";
   const acceptedForSession = decision === "approve_session";
   switch (method) {
@@ -963,9 +1166,7 @@ export function responseForApproval(method: string, decision: "approve" | "appro
     case "item/commandExecution/requestApproval":
       return { decision: accepted ? acceptedForSession ? "acceptForSession" : "accept" : decision === "expired" ? "cancel" : "decline" };
     case "item/permissions/requestApproval":
-      return accepted
-        ? { permissions: grantedPermissionsFromRequest(rawParams), scope: acceptedForSession ? "session" : "turn", strictAutoReview: false }
-        : { permissions: {}, scope: "turn", strictAutoReview: true };
+      return { permissions: {}, scope: "turn", strictAutoReview: true };
     case "applyPatchApproval":
       return { decision: accepted ? acceptedForSession ? "approved_for_session" : "approved" : decision === "expired" ? "timed_out" : "denied" };
     case "execCommandApproval":
@@ -1052,22 +1253,6 @@ function sandboxPolicyFor(sandbox: RuntimeSandboxMode, projectRoot: string): Rec
     type: "readOnly",
     networkAccess: false
   };
-}
-
-function grantedPermissionsFromRequest(rawParams: unknown): Record<string, unknown> {
-  const params = objectValue(rawParams);
-  const requested = objectValue(params?.permissions);
-  const granted: Record<string, unknown> = {};
-  if (!requested) {
-    return granted;
-  }
-  if (requested.fileSystem !== undefined && requested.fileSystem !== null) {
-    granted.fileSystem = requested.fileSystem;
-  }
-  if (requested.network !== undefined && requested.network !== null) {
-    granted.network = requested.network;
-  }
-  return granted;
 }
 
 function elicitationContent(rawParams: unknown, note: string): Record<string, unknown> {

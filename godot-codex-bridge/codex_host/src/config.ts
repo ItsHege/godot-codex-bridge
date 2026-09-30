@@ -12,6 +12,9 @@ export type HostConfig = {
   appServerPort: number;
   maxReplayEvents: number;
   backpressureLimit: number;
+  launchNonce?: string;
+  pairingSecret?: string;
+  allowedProjectRoot?: string;
 };
 
 function readNumber(name: string, fallback: number): number {
@@ -35,6 +38,14 @@ export function loadConfig(argv = process.argv.slice(2)): HostConfig {
   if (host !== "127.0.0.1" && host !== "::1") {
     throw new Error("GODOT_CODEX_HOST_BIND must be 127.0.0.1 or ::1; remote access is unsupported.");
   }
+  const launchNonce = process.env.GODOT_CODEX_HOST_LAUNCH_NONCE;
+  if (launchNonce && !/^[a-f0-9]{64}$/.test(launchNonce)) {
+    throw new Error("GODOT_CODEX_HOST_LAUNCH_NONCE is invalid.");
+  }
+  const pairingSecret = process.env.GODOT_CODEX_HOST_PAIR_SECRET;
+  if (pairingSecret && !/^[a-f0-9]{64}$/.test(pairingSecret)) {
+    throw new Error("GODOT_CODEX_HOST_PAIR_SECRET must be 64 lowercase hex characters.");
+  }
 
   return {
     host,
@@ -45,7 +56,10 @@ export function loadConfig(argv = process.argv.slice(2)): HostConfig {
       ? Number.parseInt(appServerPortArg, 10)
       : readNumber("GODOT_CODEX_APP_SERVER_PORT", 49391),
     maxReplayEvents: readNumber("GODOT_CODEX_HOST_MAX_REPLAY_EVENTS", 200),
-    backpressureLimit: readNumber("GODOT_CODEX_HOST_BACKPRESSURE_LIMIT", 500)
+    backpressureLimit: readNumber("GODOT_CODEX_HOST_BACKPRESSURE_LIMIT", 500),
+    launchNonce,
+    pairingSecret,
+    allowedProjectRoot: process.env.GODOT_CODEX_HOST_ALLOWED_PROJECT_ROOT
   };
 }
 

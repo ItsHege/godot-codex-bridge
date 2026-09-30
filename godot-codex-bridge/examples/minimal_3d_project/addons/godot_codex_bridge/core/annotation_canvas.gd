@@ -12,6 +12,13 @@ var markers: Array = []
 var _dragging := false
 var _panning := false
 var _draft_marker: Dictionary = {}
+## Marker emphasised in the view (selected in the marker list); -1 for none.
+var highlight_index := -1
+## On-screen marker color. Payloads keep their stored color (#ff00ff).
+var marker_color := Color(1.0, 0.0, 1.0, 1.0)
+const CHECKER_SIZE := 12.0
+const CHECKER_A := Color(0.13, 0.13, 0.14)
+const CHECKER_B := Color(0.16, 0.16, 0.17)
 
 
 func _init() -> void:
@@ -117,6 +124,33 @@ func marker_count() -> int:
 	return markers.size()
 
 
+## Removes one marker and relabels the rest A, B, C… so labels stay unique
+## and match the list shown to the user (nothing is attached yet).
+func remove_marker(index: int) -> void:
+	if index < 0 or index >= markers.size():
+		return
+	markers.remove_at(index)
+	relabel_markers()
+	if highlight_index >= markers.size():
+		highlight_index = markers.size() - 1
+	queue_redraw()
+	markers_changed.emit()
+
+
+func relabel_markers() -> void:
+	for index in range(markers.size()):
+		if typeof(markers[index]) == TYPE_DICTIONARY:
+			var label := label_for_index(index)
+			(markers[index] as Dictionary)["id"] = label
+			(markers[index] as Dictionary)["label"] = label
+
+
+static func label_for_index(index: int) -> String:
+	var letter_code := int("A".unicode_at(0)) + (index % 26)
+	var suffix := str(int(index / 26)) if index >= 26 else ""
+	return String.chr(letter_code) + suffix
+
+
 func marker_payloads() -> Array:
 	var payloads: Array = []
 	if source_image == null:
@@ -175,16 +209,30 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _draw() -> void:
+	_draw_checker()
 	if source_texture == null:
 		return
 	var rect := _image_rect()
+	draw_rect(rect.grow(1.0), Color(0, 0, 0, 0.6), false, 3.0)
 	draw_texture_rect(source_texture, rect, false)
-	draw_rect(rect, Color(0.35, 0.35, 0.35), false, 1.0)
-	for marker in markers:
-		if typeof(marker) == TYPE_DICTIONARY:
-			_draw_marker(marker as Dictionary, rect)
+	draw_rect(rect, Color(1, 1, 1, 0.25), false, 1.0)
+	for index in range(markers.size()):
+		if typeof(markers[index]) == TYPE_DICTIONARY:
+			_draw_marker(markers[index] as Dictionary, rect, index == highlight_index)
 	if not _draft_marker.is_empty():
 		_draw_marker(_draft_marker, rect)
+
+
+func _draw_checker() -> void:
+	draw_rect(Rect2(Vector2.ZERO, size), CHECKER_A, true)
+	var columns := int(ceil(size.x / CHECKER_SIZE))
+	var rows := int(ceil(size.y / CHECKER_SIZE))
+	if columns * rows > 20000:
+		return
+	for row in range(rows):
+		for column in range(columns):
+			if (row + column) % 2 == 1:
+				draw_rect(Rect2(Vector2(column, row) * CHECKER_SIZE, Vector2.ONE * CHECKER_SIZE), CHECKER_B, true)
 
 
 func _begin_marker(point: Vector2) -> void:
@@ -249,27 +297,48 @@ func _marker_has_size(marker: Dictionary) -> bool:
 	return a.distance_to(b) >= 3.0 or marker.get("type", "") == "freehand"
 
 
-func _draw_marker(marker: Dictionary, image_rect: Rect2) -> void:
-	var color := Color(1.0, 0.0, 1.0, 0.95)
+func _draw_marker(marker: Dictionary, image_rect: Rect2, highlighted := false) -> void:
 	var points := _scaled_points(marker, image_rect)
 	if points.is_empty():
 		return
+	# A dark outline under every stroke keeps markers visible on light and
+	# dark screenshots.
+	var width := 5.0 if highlighted else 3.0
+	for pass_index in range(2):
+		var color := Color(0, 0, 0, 0.75) if pass_index == 0 else marker_color
+		var stroke := width + 3.0 if pass_index == 0 else width
+		_draw_marker_shape(marker, points, color, stroke)
+	_draw_badge(points[0], str(marker.get("label", marker.get("id", "A"))), highlighted)
+
+
+func _draw_marker_shape(marker: Dictionary, points: Array, color: Color, width: float) -> void:
 	var marker_type := str(marker.get("type", "rectangle"))
 	if marker_type == "pin" or marker_type == "text":
 		_draw_pin(points[0], color)
 	elif marker_type == "arrow":
 		if points.size() >= 2:
-			draw_line(points[0], points[1], color, 4.0)
-			draw_circle(points[1], 5.0, color)
+			draw_line(points[0], points[1], color, width)
+			draw_circle(points[1], width + 2.0, color)
 	elif marker_type == "freehand":
 		for index in range(1, points.size()):
-			draw_line(points[index - 1], points[index], color, 4.0)
+			draw_line(points[index - 1], points[index], color, width)
 	else:
-		var bounds := _bounds_from_points(points)
-		draw_rect(bounds, color, false, 4.0)
+		draw_rect(_bounds_from_points(points), color, false, width)
+
+
+## Letter badge: filled accent circle, dark ring, white letter.
+func _draw_badge(anchor: Vector2, label: String, highlighted: bool) -> void:
+	var radius := 12.0 if highlighted else 10.0
+	var center := anchor + Vector2(-radius, -radius)
+	center.x = clampf(center.x, radius, maxf(radius, size.x - radius))
+	center.y = clampf(center.y, radius, maxf(radius, size.y - radius))
+	draw_circle(center, radius + 2.0, Color(0, 0, 0, 0.8))
+	draw_circle(center, radius, marker_color)
 	var font := get_theme_default_font()
 	if font != null:
-		draw_string(font, points[0] + Vector2(8, -8), str(marker.get("label", marker.get("id", "A"))), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, color)
+		var font_size := 13
+		var text_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+		draw_string(font, center + Vector2(-text_size.x * 0.5, text_size.y * 0.3), label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(1, 1, 1))
 
 
 func _draw_pin(point: Vector2, color: Color) -> void:

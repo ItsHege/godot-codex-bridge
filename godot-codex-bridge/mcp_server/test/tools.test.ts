@@ -626,7 +626,7 @@ test("open scene handler writes addon request for a valid scene", async () => {
   await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
   await fs.writeFile(
     path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
-    JSON.stringify({ status: "succeeded", data: { opened_scene: "res://scenes/main.tscn" } }),
+    JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { opened_scene: "res://scenes/main.tscn" } }),
     "utf8",
   );
 
@@ -660,7 +660,7 @@ test("run current scene handler accepts an optional explicit scene path", async 
   await fs.mkdir(path.join(config.bridgeDir, "responses"), { recursive: true });
   await fs.writeFile(
     path.join(config.bridgeDir, "responses", `${request.request_id}.json`),
-    JSON.stringify({ status: "succeeded", data: { scene_file_path: "res://scenes/playtest.tscn" } }),
+    JSON.stringify({ request_id: request.request_id, status: "succeeded", data: { scene_file_path: "res://scenes/playtest.tscn" } }),
     "utf8",
   );
 
@@ -735,13 +735,15 @@ test("timeline screenshot handler captures multiple frames and writes a local ma
   assert.equal(Array.isArray(manifest.frames), true);
 });
 
-test("timeline screenshot handler can compare captured frames to a visual baseline", async () => {
+test("timeline screenshot handler records that baseline comparison is disabled", async () => {
   const config = await makeConfig();
   await writeLiveHeartbeat(config.bridgeDir);
   await fs.mkdir(config.bridgeDir, { recursive: true });
-  const baselinePath = path.join(config.projectRoot, "baseline.png");
-  const frameOnePath = path.join(config.projectRoot, "frame-one.png");
-  const frameTwoPath = path.join(config.projectRoot, "frame-two.png");
+  const screenshotRoot = path.join(config.bridgeDir, "artifacts", "screenshots");
+  await fs.mkdir(screenshotRoot, { recursive: true });
+  const baselinePath = path.join(screenshotRoot, "baseline.png");
+  const frameOnePath = path.join(screenshotRoot, "frame-one.png");
+  const frameTwoPath = path.join(screenshotRoot, "frame-two.png");
   await fs.writeFile(baselinePath, ONE_BY_ONE_PNG);
   await fs.writeFile(frameOnePath, ONE_BY_ONE_PNG);
   await fs.writeFile(frameTwoPath, ONE_BY_ONE_PNG);
@@ -780,23 +782,18 @@ test("timeline screenshot handler can compare captured frames to a visual baseli
   const comparison = result.structuredContent?.baseline_comparison as {
     status?: string;
     frame_count_compared?: number;
-    exact_match_count?: number;
-    changed_frame_count?: number;
-    comparisons?: Array<{ status?: string; exact_match?: boolean; result_path?: string }>;
+    mitigation?: string;
   };
-  assert.equal(comparison.status, "ok");
-  assert.equal(comparison.frame_count_compared, 2);
-  assert.equal(comparison.exact_match_count, 2);
-  assert.equal(comparison.changed_frame_count, 0);
-  assert.equal(comparison.comparisons?.length, 2);
-  assert.equal(comparison.comparisons?.every((item) => item.status === "ok" && item.exact_match === true), true);
+  assert.equal(comparison.status, "disabled");
+  assert.equal(comparison.frame_count_compared, 0);
+  assert.equal(comparison.mitigation, "trusted_visual_input_provenance_unavailable");
 
   const manifestPath = String(result.structuredContent?.manifest_path);
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
     baseline_comparison?: { status?: string; frame_count_compared?: number };
   };
-  assert.equal(manifest.baseline_comparison?.status, "ok");
-  assert.equal(manifest.baseline_comparison?.frame_count_compared, 2);
+  assert.equal(manifest.baseline_comparison?.status, "disabled");
+  assert.equal(manifest.baseline_comparison?.frame_count_compared, 0);
 });
 
 test("timeline screenshot handler validates bounds before sending requests", async () => {
@@ -811,13 +808,15 @@ test("timeline screenshot handler validates bounds before sending requests", asy
   assert.equal((result.structuredContent?.error as { code?: string })?.code, "invalid_timeline_frame_count");
 });
 
-test("multi-view screenshot handler writes editor_control request and can compare frames", async () => {
+test("multi-view screenshot handler writes editor_control request and records disabled comparison", async () => {
   const config = await makeConfig();
   await writeLiveHeartbeat(config.bridgeDir);
   await fs.mkdir(config.bridgeDir, { recursive: true });
-  const baselinePath = path.join(config.projectRoot, "baseline.png");
-  const frontPath = path.join(config.projectRoot, "front.png");
-  const topPath = path.join(config.projectRoot, "top.png");
+  const screenshotRoot = path.join(config.bridgeDir, "artifacts", "screenshots");
+  await fs.mkdir(screenshotRoot, { recursive: true });
+  const baselinePath = path.join(screenshotRoot, "baseline.png");
+  const frontPath = path.join(screenshotRoot, "front.png");
+  const topPath = path.join(screenshotRoot, "top.png");
   await fs.writeFile(baselinePath, ONE_BY_ONE_PNG);
   await fs.writeFile(frontPath, ONE_BY_ONE_PNG);
   await fs.writeFile(topPath, ONE_BY_ONE_PNG);
@@ -874,11 +873,11 @@ test("multi-view screenshot handler writes editor_control request and can compar
   const comparison = result.structuredContent?.baseline_comparison as {
     status?: string;
     compared_frames?: number;
-    comparisons?: Array<{ result?: { status?: string; exact_match?: boolean } }>;
+    mitigation?: string;
   };
-  assert.equal(comparison.status, "ok");
-  assert.equal(comparison.compared_frames, 2);
-  assert.equal(comparison.comparisons?.every((item) => item.result?.status === "ok" && item.result?.exact_match === true), true);
+  assert.equal(comparison.status, "disabled");
+  assert.equal(comparison.compared_frames, 0);
+  assert.equal(comparison.mitigation, "trusted_visual_input_provenance_unavailable");
 
   const invalidView = await handlers["godot.capture_multi_view_screenshots"]({ views: ["front", "diagonal"] });
   assert.equal(invalidView.isError, true);
@@ -1218,7 +1217,16 @@ test("emergency stop writes editor_control request", async () => {
   assert.equal((await stopPending).isError, false);
 });
 
-test("playtest input writes gated editor_control request and validates inputs", async () => {
+test("playtest input fails closed until the addon exposes trusted live authorization", async () => {
+  {
+    const config = await makeConfig();
+    const handlers = createToolHandlers(config);
+    const result = await handlers["godot.playtest_input"]({ type: "action_press", action: "jump" });
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_runtime_approval_unavailable");
+    assert.equal((await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => [])).length, 0);
+    return;
+  }
   const config = await makeConfig();
   await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
@@ -1269,7 +1277,19 @@ test("playtest input writes gated editor_control request and validates inputs", 
   assert.equal((tooMany.structuredContent?.error as { code?: string })?.code, "too_many_playtest_input_steps");
 });
 
-test("playtest scenario writes bounded editor_control request and validates contract", async () => {
+test("playtest scenario fails closed until the addon exposes trusted live authorization", async () => {
+  {
+    const config = await makeConfig();
+    const handlers = createToolHandlers(config);
+    const result = await handlers["godot.run_playtest_scenario"]({
+      scenePath: "res://scenes/playtest.tscn",
+      steps: [{ type: "wait_seconds", seconds: 0.1 }],
+    });
+    assert.equal(result.isError, true);
+    assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_runtime_approval_unavailable");
+    assert.equal((await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => [])).length, 0);
+    return;
+  }
   const config = await makeConfig();
   await fs.mkdir(path.join(config.projectRoot, "scenes"), { recursive: true });
   await fs.writeFile(path.join(config.projectRoot, "scenes", "playtest.tscn"), "[gd_scene format=3]\n", "utf8");
@@ -1365,62 +1385,48 @@ test("playtest scenario writes bounded editor_control request and validates cont
   assert.equal((badTimeline.structuredContent?.error as { code?: string })?.code, "invalid_playtest_timeline_frame_count");
 });
 
-test("save scene tools write editor_control requests", async () => {
+test("save scene tools fail closed without trusted state-bound approval receipts", async () => {
   const config = await makeConfig();
-  await writeLiveHeartbeat(config.bridgeDir);
   const handlers = createToolHandlers(config);
 
-  const savePending = handlers["godot.save_scene"]({ timeoutMs: 1_000 });
-  let requestPath = await waitForRequest(path.join(config.bridgeDir, "requests"));
-  let request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
-    request_id: string;
-    type: string;
-    payload: { action?: unknown; params?: Record<string, unknown>; reason?: unknown };
-  };
-  assert.equal(request.type, "editor_control");
-  assert.equal(request.payload.action, "save_scene");
-  await writeAddonResponse(config.bridgeDir, request.request_id, {
-    status: "succeeded",
-    data: {
-      action: "save_scene",
-      saved: true,
-      save_state: {
-        status: "saved_to_disk",
-        save_scope: "current_scene",
-        target_scene: "res://scenes/main.tscn",
-      },
-    },
-  });
-  const saveResult = await savePending;
-  assert.equal(saveResult.isError, false);
-  const saveResponse = saveResult.structuredContent?.response as {
-    data?: {
-      save_state?: { status?: string };
-      post_save_check?: { check_kind?: string; status?: string; validation_status?: string };
-      post_save_check_passed?: boolean;
-    };
-  } | undefined;
-  assert.equal(saveResponse?.data?.save_state?.status, "saved_to_disk");
-  assert.equal(saveResponse?.data?.post_save_check?.check_kind, "godot_headless_check_only");
-  assert.equal(saveResponse?.data?.post_save_check?.status, "invalid_request");
-  assert.equal(saveResponse?.data?.post_save_check?.validation_status, "not_run");
-  assert.equal(saveResponse?.data?.post_save_check_passed, false);
-  assert.equal(saveResult.structuredContent?.post_save_check_passed, false);
+  const saveResult = await handlers["godot.save_scene"]({ timeoutMs: 1_000 });
+  assert.equal(saveResult.isError, true);
+  assert.equal((saveResult.structuredContent?.error as { code?: string })?.code, "trusted_scene_save_approval_unavailable");
 
-  const saveAllPending = handlers["godot.save_all_scenes"]({ timeoutMs: 1_000 });
-  requestPath = await waitForNewestRequest(path.join(config.bridgeDir, "requests"), request.request_id);
-  request = JSON.parse(await fs.readFile(requestPath, "utf8")) as {
-    request_id: string;
-    type: string;
-    payload: { action?: unknown; params?: Record<string, unknown> };
-  };
-  assert.equal(request.type, "editor_control");
-  assert.equal(request.payload.action, "save_all_scenes");
-  await writeAddonResponse(config.bridgeDir, request.request_id, {
-    status: "succeeded",
-    data: { action: "save_all_scenes", saved: true },
+  const saveAllResult = await handlers["godot.save_all_scenes"]({ timeoutMs: 1_000 });
+  assert.equal(saveAllResult.isError, true);
+  assert.equal((saveAllResult.structuredContent?.error as { code?: string })?.code, "trusted_scene_save_approval_unavailable");
+
+  const requestsDir = path.join(config.bridgeDir, "requests");
+  const requests = await fs.readdir(requestsDir).catch(() => []);
+  assert.deepEqual(requests, []);
+});
+
+test("direct MCP test-scene execution fails closed without live runtime authorization", async () => {
+  const config = await makeConfig();
+  const handlers = createToolHandlers(config);
+
+  const result = await handlers["godot.run_test_scene"]({ scenePath: "res://scenes/test_3d.tscn" });
+
+  assert.equal(result.isError, true);
+  assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_runtime_approval_unavailable");
+  const requests = await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => []);
+  assert.deepEqual(requests, []);
+});
+
+test("selected-node fixes fail closed without trusted state-bound approval receipts", async () => {
+  const config = await makeConfig();
+  const handlers = createToolHandlers(config);
+
+  const result = await handlers["godot.fix_selected_node"]({
+    fixCode: "unhide_node",
+    approvalToken: "APPROVE_GODOT_CODEX_BRIDGE_FIX_SELECTED_NODE",
   });
-  assert.equal((await saveAllPending).isError, false);
+
+  assert.equal(result.isError, true);
+  assert.equal((result.structuredContent?.error as { code?: string })?.code, "trusted_node_fix_approval_unavailable");
+  const requests = await fs.readdir(path.join(config.bridgeDir, "requests")).catch(() => []);
+  assert.deepEqual(requests, []);
 });
 
 test("on-demand introspection tools write editor_control requests and validate inputs", async () => {
@@ -2735,7 +2741,7 @@ async function waitForEditorControlAction(requestsDir: string, action: string, p
 
 async function writeAddonResponse(bridgeDir: string, requestId: string, response: Record<string, unknown>): Promise<void> {
   await fs.mkdir(path.join(bridgeDir, "responses"), { recursive: true });
-  await fs.writeFile(path.join(bridgeDir, "responses", `${requestId}.json`), JSON.stringify(response), "utf8");
+  await fs.writeFile(path.join(bridgeDir, "responses", `${requestId}.json`), JSON.stringify({ ...response, request_id: requestId }), "utf8");
 }
 
 async function writeLiveHeartbeat(bridgeDir: string): Promise<void> {

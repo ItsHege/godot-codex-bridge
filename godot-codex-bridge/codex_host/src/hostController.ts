@@ -8,7 +8,10 @@ import type { CodexRuntimeAdapter } from "./codexRuntime.js";
 import { event } from "./codexRuntime.js";
 import { buildProjectOrientationBundle } from "./orientationBundle.js";
 import { resolveProject } from "./projectRoots.js";
+import { assertPhysicalPathSync, ensureDirectoryInsideRootSync, readFileInsideRootSync, writeFileInsideRootSync } from "./physicalPath.js";
 import { SessionStore } from "./sessionStore.js";
+import { AddonUpdater } from "./addonUpdater.js";
+import { sessionAllowableTool } from "./sessionToolApprovals.js";
 import type {
   ApprovalRespondParams,
   BackgroundCancelParams,
@@ -29,7 +32,7 @@ import type {
   ThreadSendParams
 } from "./types.js";
 import { HOST_PROTOCOL_VERSION } from "./types.js";
-import { createApprovalUndoSnapshot, type UndoSnapshotSummary } from "./undoEvidence.js";
+import { createApprovalUndoSnapshot, verifyApprovalUndoSnapshotCurrent, type UndoSnapshotSummary } from "./undoEvidence.js";
 
 export class HostController extends EventEmitter {
   private state: RuntimeState = "disconnected";
@@ -46,11 +49,15 @@ export class HostController extends EventEmitter {
   private modelInventory: RuntimeModelInventory | null = null;
   private trustMode: "off" | "full_machine" = "off";
   private readonly orientationSentThreadIds = new Set<string>();
+  private shuttingDown = false;
+  /** Read-only Bridge tools the user allowed for this Host session and project. */
+  private readonly sessionAllowedTools = new Set<string>();
   private readonly approvalExpiryTimer: NodeJS.Timeout;
 
   constructor(
     private readonly config: HostConfig,
-    private readonly runtime: CodexRuntimeAdapter
+    private readonly runtime: CodexRuntimeAdapter,
+    private readonly addonUpdater: AddonUpdater = new AddonUpdater()
   ) {
     super();
     this.state = "ready";
@@ -70,6 +77,7 @@ export class HostController extends EventEmitter {
       threadId: this.threadId,
       turnId: this.turnId,
       pendingApprovals: this.approvalGate?.pendingCount() ?? 0,
+      sessionAllowedTools: [...this.sessionAllowedTools].sort(),
       backgroundTasks: this.backgroundManager?.activeCount() ?? 0,
       eventQueueDepth: this.listenerCount("event"),
       updatedAt: new Date().toISOString(),
@@ -87,6 +95,10 @@ export class HostController extends EventEmitter {
   }
 
   async handleRequest(request: JsonRpcRequest): Promise<unknown> {
+    // Shutdown may wait for a pending addon update; accept no new work meanwhile.
+    if (this.shuttingDown && !["host.health", "addon.update.check", "addon.update.cancel"].includes(request.method)) {
+      throw new Error("host_shutting_down: the Host is stopping after the pending addon update.");
+    }
     switch (request.method) {
       case "host.health":
         return this.status();
@@ -99,6 +111,8 @@ export class HostController extends EventEmitter {
       case "project.attach":
         return this.attachProject(request.params as ProjectAttachParams);
       case "thread.start":
+        // A new chat does not inherit silent tool approvals.
+        this.sessionAllowedTools.clear();
         return this.startThread();
       case "thread.resume":
         return this.resumeThread(request.params as { thread_id?: string });
@@ -114,6 +128,10 @@ export class HostController extends EventEmitter {
         return this.backgroundStatus();
       case "background.cancel":
         return this.cancelBackgroundTask(request.params as BackgroundCancelParams);
+      case "approval.session_allow.clear":
+        this.sessionAllowedTools.clear();
+        await this.broadcastStatus();
+        return { cleared: true };
       case "approval.respond":
         return this.respondToApproval(request.params as ApprovalRespondParams);
       case "runtime.models.list":
@@ -124,10 +142,29 @@ export class HostController extends EventEmitter {
         return this.enableBridgeTools();
       case "session.trust.set":
         return this.setTrustSession(request.params as SessionTrustSetParams);
+      case "addon.update.check":
+        return this.addonUpdater.check(this.requireProject().projectRoot);
+      case "addon.update.schedule": {
+        const project = this.requireProject();
+        return this.addonUpdater.schedule(project.projectRoot, project.bridgeDir, (request.params ?? {}) as Record<string, unknown>);
+      }
+      case "addon.update.cancel":
+        return this.addonUpdater.cancel();
       case "session.trust.clear":
         return this.clearTrustSession();
       default:
         throw new Error(`unknown_method: ${request.method}`);
+    }
+  }
+
+  isShuttingDown(): boolean {
+    return this.shuttingDown;
+  }
+
+  async whenAddonUpdateSettled(): Promise<void> {
+    this.shuttingDown = true;
+    if (this.addonUpdater.isBusy() && this.addonUpdater.running) {
+      await this.addonUpdater.running.catch(() => undefined);
     }
   }
 
@@ -146,6 +183,16 @@ export class HostController extends EventEmitter {
       broadcastReconnect?: boolean;
     } = {}
   ): Promise<HostStatus> {
+    if (this.config.allowedProjectRoot) {
+      const requestedRoot = path.resolve(params.project_root);
+      const approvedRoot = path.resolve(this.config.allowedProjectRoot);
+      const matches = process.platform === "win32"
+        ? requestedRoot.toLowerCase() === approvedRoot.toLowerCase()
+        : requestedRoot === approvedRoot;
+      if (!matches) {
+        throw new Error("project_not_approved_for_host_start: this Host was started for a different project.");
+      }
+    }
     const previousState = this.state;
     this.setState("connecting");
     try {
@@ -168,6 +215,8 @@ export class HostController extends EventEmitter {
         this.toolInventory = null;
         this.modelInventory = null;
         this.orientationSentThreadIds.clear();
+        // Remembered tool approvals never outlive a session reset.
+        this.sessionAllowedTools.clear();
         if (options.cleanupReason) {
           cleanupEvidencePath = await this.writeHostCleanupEvidence(nextProject, {
             reason: options.cleanupReason,
@@ -185,9 +234,10 @@ export class HostController extends EventEmitter {
         }
       }
       this.project = nextProject;
-      this.store = new SessionStore(this.project.hostStateDir, this.config.maxReplayEvents);
+      this.runtime.setBridgeProject?.(nextProject.projectRoot, nextProject.bridgeDir);
+      this.store = new SessionStore(this.project.hostStateDir, this.config.maxReplayEvents, this.project.projectRoot);
       await this.store.init();
-      this.approvalGate = new ApprovalGate(path.join(this.project.hostStateDir, "approvals"), () => this.trustMode);
+      this.approvalGate = new ApprovalGate(path.join(this.project.hostStateDir, "approvals"), () => this.trustMode, this.project.projectRoot);
       await this.approvalGate.init();
       this.backgroundManager = new BackgroundAgentManager(this.project, this.runtime, (hostEvent) => this.broadcast(hostEvent));
       this.session = {
@@ -258,10 +308,19 @@ export class HostController extends EventEmitter {
     };
   }
 
-  private requestShutdown(): { accepted: true; status: HostStatus } {
-    setImmediate(() => this.emit("shutdownRequested"));
+  private requestShutdown(): { accepted: true; deferred_for_addon_update: boolean; status: HostStatus } {
+    // A closing editor may ask its Host to stop; a scheduled addon update
+    // needs the Host alive until it has installed and reopened the project.
+    const deferred = this.addonUpdater.isBusy();
+    this.shuttingDown = true;
+    if (deferred && this.addonUpdater.running) {
+      void this.addonUpdater.running.finally(() => this.emit("shutdownRequested"));
+    } else {
+      setImmediate(() => this.emit("shutdownRequested"));
+    }
     return {
       accepted: true,
+      deferred_for_addon_update: deferred,
       status: this.status()
     };
   }
@@ -368,6 +427,7 @@ export class HostController extends EventEmitter {
           this.setState("ready");
         }
         if (runtimeEvent.method === "error") {
+          this.turnId = undefined;
           this.recoverableMessage = String(runtimeEvent.params.message ?? "runtime_error");
           this.setState("error_recoverable");
         }
@@ -375,6 +435,7 @@ export class HostController extends EventEmitter {
         await this.broadcastStatus();
       }
     } catch (error) {
+      this.turnId = undefined;
       this.recoverableMessage = (error as Error).message;
       this.setState("error_recoverable");
       await this.broadcast(
@@ -464,7 +525,21 @@ export class HostController extends EventEmitter {
     if (!this.approvalGate) {
       throw new Error("approval_gate_unavailable");
     }
+    const pending = this.approvalGate.get(params.approval_id);
+    if (!pending || !this.approvalMatchesActiveTurn(pending.thread_id, pending.turn_id)) {
+      throw new Error(`approval_stale_turn: ${params.approval_id}`);
+    }
+    const rememberTool = params.remember_for_session
+      ? sessionAllowableTool(pending.raw_method, pending.raw_params)
+      : null;
+    if (params.remember_for_session && (params.decision !== "approve" || !rememberTool)) {
+      throw new Error("approval_session_allow_not_eligible: only a plain approval of a read-only Godot Bridge tool can be remembered.");
+    }
     const { approval, runtimeDecision } = await this.approvalGate.beginResolve(params);
+    if (!this.approvalMatchesActiveTurn(approval.thread_id, approval.turn_id)) {
+      await this.approvalGate.invalidateByRuntimeId(approval.runtime_approval_id, "active_turn_changed", "invalidated");
+      throw new Error(`approval_stale_turn: ${params.approval_id}`);
+    }
     let undoSnapshot: UndoSnapshotSummary | undefined;
     try {
       if ((runtimeDecision === "approve" || runtimeDecision === "approve_session") && (approval.kind === "file_change" || approval.kind === "apply_patch")) {
@@ -479,6 +554,9 @@ export class HostController extends EventEmitter {
       throw error;
     }
     try {
+		if (undoSnapshot) {
+			await verifyApprovalUndoSnapshotCurrent(undoSnapshot);
+		}
       await this.runtime.respondToApproval(approval.runtime_approval_id, runtimeDecision, params.note ?? "");
     } catch (error) {
       const invalidated = await this.approvalGate.invalidateByRuntimeId(
@@ -494,14 +572,18 @@ export class HostController extends EventEmitter {
       throw new Error(`approval_stale: ${approval.approval_id}`);
     }
     await this.approvalGate.completeResolve(approval.approval_id, runtimeDecision);
+    if (rememberTool) {
+      this.sessionAllowedTools.add(rememberTool);
+    }
     await this.broadcast(event("approval.resolved", {
       approval_id: approval.approval_id,
       runtime_approval_id: approval.runtime_approval_id,
       decision: runtimeDecision,
       status: approval.status,
       undo_snapshot_path: undoSnapshot?.manifest_path,
-      undo_snapshot_file_count: undoSnapshot?.copied_count,
-      note: params.note ?? ""
+      undo_snapshot_file_count: undoSnapshot?.covered_count,
+      note: params.note ?? "",
+      remembered_tool: rememberTool ?? undefined
     }));
     this.restoreStateAfterApproval();
     await this.broadcastStatus();
@@ -520,6 +602,7 @@ export class HostController extends EventEmitter {
       throw new Error(`host_busy: ${this.state}`);
     }
     this.trustMode = mode;
+    this.sessionAllowedTools.clear();
     this.threadId = undefined;
     this.turnId = undefined;
     this.orientationSentThreadIds.clear();
@@ -545,6 +628,7 @@ export class HostController extends EventEmitter {
       throw new Error(`host_busy: ${this.state}`);
     }
     this.trustMode = "off";
+    this.sessionAllowedTools.clear();
     this.threadId = undefined;
     this.turnId = undefined;
     this.orientationSentThreadIds.clear();
@@ -609,16 +693,51 @@ export class HostController extends EventEmitter {
     };
   }
 
-  private async prepareApprovalEvent(runtimeEvent: HostEvent): Promise<HostEvent> {
+  private async prepareApprovalEvent(runtimeEvent: HostEvent): Promise<HostEvent | null> {
     if (!this.approvalGate) {
       throw new Error("approval_gate_unavailable");
     }
     const raw = runtimeEvent.params;
+    const threadId = typeof raw.thread_id === "string" ? raw.thread_id : "";
+    const turnId = typeof raw.turn_id === "string" && raw.turn_id
+      ? raw.turn_id
+      : raw.raw_method === "execCommandApproval" || raw.raw_method === "applyPatchApproval"
+        ? this.turnId ?? ""
+        : "";
+    if (!this.approvalMatchesActiveTurn(threadId, turnId)) {
+      const runtimeApprovalId = String(raw.runtime_approval_id ?? "");
+      if (runtimeApprovalId) {
+        await this.runtime.respondToApproval(runtimeApprovalId, "reject");
+      }
+      return null;
+    }
+    const allowableTool = sessionAllowableTool(raw.raw_method, raw.raw_params ?? raw);
+    const runtimeApprovalId = String(raw.runtime_approval_id ?? raw.approval_id ?? "");
+    if (allowableTool && this.sessionAllowedTools.has(allowableTool) && runtimeApprovalId) {
+      // Remembered for this session: answer without a card, but say so.
+      try {
+        await this.runtime.respondToApproval(runtimeApprovalId, "approve");
+      } catch {
+        // The request disappeared (resolved or turn ended); nothing to approve.
+        return null;
+      }
+      // Auditable: which call ran silently, with Codex's own bounded summary of its arguments.
+      const meta = raw.raw_params && typeof raw.raw_params === "object" ? (raw.raw_params as Record<string, unknown>)._meta : undefined;
+      const display = meta && typeof meta === "object" ? (meta as Record<string, unknown>).tool_params_display : undefined;
+      await this.broadcast(event("approval.auto_approved", {
+        tool: allowableTool,
+        thread_id: threadId,
+        turn_id: turnId,
+        runtime_approval_id: runtimeApprovalId,
+        params_display: JSON.stringify(display ?? []).slice(0, 500)
+      }));
+      return null;
+    }
     const approval = await this.approvalGate.create({
       runtime_approval_id: String(raw.runtime_approval_id ?? raw.approval_id ?? ""),
       kind: raw.kind as never,
-      thread_id: raw.thread_id ? String(raw.thread_id) : undefined,
-      turn_id: raw.turn_id ? String(raw.turn_id) : undefined,
+      thread_id: threadId,
+      turn_id: turnId,
       item_id: raw.item_id ? String(raw.item_id) : undefined,
       reason: raw.reason === undefined ? null : String(raw.reason),
       cwd: raw.cwd === undefined || raw.cwd === null ? null : String(raw.cwd),
@@ -629,7 +748,14 @@ export class HostController extends EventEmitter {
       raw_method: String(raw.raw_method ?? "unknown"),
       raw_params: raw.raw_params ?? raw
     });
-    return event("approval.requested", approval as unknown as Record<string, unknown>);
+    return event("approval.requested", {
+      ...(approval as unknown as Record<string, unknown>),
+      session_allow_tool: allowableTool ?? undefined
+    });
+  }
+
+  private approvalMatchesActiveTurn(threadId: string | undefined, turnId: string | undefined): boolean {
+    return Boolean(threadId && turnId && threadId === this.threadId && turnId === this.turnId);
   }
 
   private async prepareApprovalInvalidatedEvent(runtimeEvent: HostEvent): Promise<HostEvent | null> {
@@ -684,20 +810,29 @@ export class HostController extends EventEmitter {
     ensureInside(baseDir, annotationDir, "annotation_path_outside_bridge");
 
     const manifestPath = path.join(annotationDir, "annotation.json");
-    const stat = await fs.stat(manifestPath).catch(() => null);
-    if (!stat?.isFile()) {
+    let manifestBytes: Buffer;
+    try {
+      manifestBytes = readFileInsideRootSync(project.projectRoot, manifestPath);
+    } catch {
       throw new Error(`annotation_not_found: ${annotationId}`);
     }
-    if (stat.size > 256_000) {
+    if (manifestBytes.byteLength > 256_000) {
       throw new Error(`annotation_manifest_too_large: ${annotationId}`);
     }
 
-    const manifest = parseJsonObject(await fs.readFile(manifestPath, "utf8"), `annotation_manifest_invalid: ${annotationId}`);
+    const manifest = parseJsonObject(manifestBytes.toString("utf8"), `annotation_manifest_invalid: ${annotationId}`);
     const rawImagePath = path.join(annotationDir, "raw.png");
     const annotatedImagePath = path.join(annotationDir, "annotated.png");
     const includeImage = params.annotation.include_image !== false && params.annotation.includeImage !== false;
     const imageSupported = includeImage ? await this.selectedModelSupportsImage(params.model) : false;
-    const annotatedExists = await fileExists(annotatedImagePath);
+    const annotatedExists = (() => {
+      try {
+        assertPhysicalPathSync(project.projectRoot, annotatedImagePath);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
     const imageAttached = includeImage && imageSupported && annotatedExists;
     const imageAttachmentReason = imageAttached
       ? undefined
@@ -849,15 +984,15 @@ export class HostController extends EventEmitter {
   private async writeHostCleanupEvidence(project: ProjectSummary, payload: Record<string, unknown>): Promise<string | undefined> {
     try {
       const cleanupDir = path.join(project.bridgeDir, "artifacts", "codex_host_cleanup");
-      await fs.mkdir(cleanupDir, { recursive: true });
+      ensureDirectoryInsideRootSync(project.projectRoot, cleanupDir);
       const filePath = path.join(cleanupDir, `host-cleanup-${Date.now()}.json`);
-      await fs.writeFile(filePath, JSON.stringify({
+      writeFileInsideRootSync(project.projectRoot, filePath, JSON.stringify({
         cleanup_version: "godot-codex-bridge/host-cleanup-v1",
         created_at: new Date().toISOString(),
         bridge_dir: project.bridgeDir,
         host_state_dir: project.hostStateDir,
         ...payload,
-      }, null, 2), "utf8");
+      }, null, 2));
       return filePath;
     } catch (error) {
       await this.broadcast(event("runtime.warning", {

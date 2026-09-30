@@ -101,7 +101,7 @@ static func connect_request_plan(chat_allowed: bool, socket_present: bool, socke
 		}
 	return {
 		"action": "connect",
-		"host_connect_autostart_allowed": true,
+		"host_connect_autostart_allowed": false,
 		"host_launch_attempted": false,
 		"chat_auto_enable_tools_requested": false,
 		"log_attempt": true,
@@ -125,7 +125,7 @@ static func connect_request_effect_plan(chat_allowed: bool, socket_present: bool
 		effects.append({
 			"action": "apply_connect_request_state",
 			"state": {
-				"host_connect_autostart_allowed": bool(plan.get("host_connect_autostart_allowed", true)),
+				"host_connect_autostart_allowed": bool(plan.get("host_connect_autostart_allowed", false)),
 				"host_launch_attempted": bool(plan.get("host_launch_attempted", false)),
 				"chat_auto_enable_tools_requested": bool(plan.get("chat_auto_enable_tools_requested", false)),
 			},
@@ -404,7 +404,7 @@ static func closed_socket_decision(connection_state: String, runtime_state: Stri
 				result["runtime_state"] = runtime_state
 				return result
 		result["runtime_state"] = "error_recoverable"
-		result["system_message"] = "Codex is not available. Press Connect to try again after refreshing the addon install."
+		result["system_message"] = "Trusted Host is not running. Start it from the trusted installation, then press Connect."
 	elif connection_state != "disconnected":
 		result["system_message"] = "Codex disconnected. Press Connect to reconnect."
 	if result["runtime_state"] != "error_recoverable" and runtime_state == "error_recoverable":
@@ -637,6 +637,9 @@ static func host_start_failure_state(launch_plan: Dictionary) -> Dictionary:
 	if code == "missing_config":
 		status = "missing"
 		config_message = "Launcher config missing. Refresh the addon install."
+	elif code == "automatic_launch_disabled":
+		status = "manual_start_required"
+		config_message = "Automatic Host launch is disabled. Start it from the trusted installation, then connect."
 	return {
 		"ok": false,
 		"error_code": code,

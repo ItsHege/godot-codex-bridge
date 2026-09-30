@@ -23,6 +23,18 @@ func _run() -> void:
 	_assert_eq(EditorPathGuard.validate_res_dir_path("res://../outside").get("code"), "invalid_resource_root", "traversal root rejected")
 	_assert_eq(EditorPathGuard.validate_res_dir_path("res://.import/cache").get("code"), "invalid_resource_root", "import root rejected")
 	_assert_eq(EditorPathGuard.validate_res_dir_path("res://.godot/cache").get("code"), "invalid_resource_root", "godot cache root rejected")
+	for aliased in ["res://.GODOT/cache", "res://.Godot/editor", "res://.godot", "res://.GODOT", "res://.godot./cache", "res://.godot /cache", "res://.godot::$INDEX_ALLOCATION/cache", "res://.IMPORT/cache", "res://assets/.Import/cache", "res://.godot\\cache"]:
+		_assert_eq(EditorPathGuard.validate_res_dir_path(aliased).get("code"), "invalid_resource_root", "generated root alias rejected: " + aliased)
+	for aliased_file in ["res://.GODOT/imported/tree.png", "res://.godot./imported/tree.png", "res://assets/.IMPORT/tree.png", "res://.godot:x/imported/tree.png"]:
+		_assert_eq(EditorPathGuard.validate_res_path(aliased_file, [".png"], "texture", false).get("code"), "invalid_texture_path", "generated file alias rejected: " + aliased_file)
+	_assert_eq(EditorPathGuard.validate_scene_path("res://.GODOT/ghost.tscn", false).get("code"), "invalid_scene_path", "uppercase generated scene rejected")
+	_assert_eq(EditorPathGuard.validate_res_path("res://assets./tree.png", [".png"], "texture", false).get("code"), "invalid_texture_path", "trailing-dot segment rejected")
+	_assert_eq(EditorPathGuard.validate_res_path("res://assets/tree.png ", [".png"], "texture", false).get("code"), "invalid_texture_path", "trailing-space segment rejected")
+	_assert_eq(EditorPathGuard.validate_res_path("res://assets\\tree.png", [".png"], "texture", false).get("code"), "invalid_texture_path", "backslash path rejected")
+	_assert_true(EditorPathGuard.is_generated_resource_path(".GoDoT/x"), "generated check is case-insensitive")
+	_assert_false(EditorPathGuard.is_generated_resource_path("assets/.godot/x"), "nested .godot is not the project cache")
+	_assert_false(EditorPathGuard.is_generated_resource_path(".godotignore_assets/x"), "prefix-only match not generated")
+	_assert_true(EditorPathGuard.validate_res_dir_path("res://assets/My Scenes/v1.2").is_empty(), "inner dots and spaces still accepted")
 
 	_assert_true(EditorPathGuard.validate_res_path("res://assets/tree.png", [".png"], "texture", false).is_empty(), "valid texture path accepted")
 	_assert_eq(EditorPathGuard.validate_res_path("C:/tree.png", [".png"], "texture", false).get("code"), "invalid_texture_path", "absolute file rejected")

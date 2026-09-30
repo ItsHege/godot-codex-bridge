@@ -4,25 +4,19 @@ The MVP server is a local stdio MCP server implemented in TypeScript/Node with
 the official MCP TypeScript SDK. Tools are intentionally narrow and
 Godot-aware.
 
-## v0.1.0 Live Addon Availability
+## Live Addon Availability
 
-These tools are registered by the MCP server, but the editor actions they send
-are not handled by the v0.1.0 addon yet. Against a live editor they return
-`unsupported_editor_action`:
+Every editor action the MCP server sends is registered by the addon, and an
+addon test checks that the advertised action list matches the registered
+handlers. `godot.editor_viewport_navigate` supports the 2D viewport only; 3D
+camera control returns `editor_api_unavailable`.
 
-- `godot.get_inspector_context`
-- `godot.editor_viewport_navigate`
-- `godot.get_spatial_bounds`
-- `godot.spatial_query`
-- `godot.placement_check`
-- `godot.snap_to_ground`
-- `godot.snap_to_grid`
-- `godot.undo_last_bridge_action`
-- `godot.emergency_stop`
+These tools are registered but intentionally fail closed with
+`trusted_runtime_approval_unavailable` until the addon exposes trusted live
+runtime authorization:
+
 - `godot.playtest_input`
 - `godot.run_playtest_scenario`
-
-Their sections below describe the intended contract.
 
 ## MVP Tools
 
@@ -63,25 +57,20 @@ actions. The payload includes project root, addon path, detectable plugin
 enabled status, heartbeat age, snapshot age, protocol version, addon version,
 active/stale editor state, and addon request transport diagnostics.
 
-When `addon_request_transport.preferred` is `host_websocket_rpc`, addon-backed
-MCP requests go through the local Codex Host `/bridge/request` endpoint and are
-relayed to the connected Godot addon over its WebSocket. When no host RPC URL is
-configured or the host RPC endpoint is unavailable, the MCP server falls back to
-the project-local file bridge (`requests/` and `responses/`) for compatibility
-and debugging.
+The Host `/bridge/request` HTTP endpoint currently returns
+`bridge_rpc_unavailable` while an authenticated MCP transport is designed.
+Addon-backed MCP requests use the project-local file bridge (`requests/` and
+`responses/`). A discovered Host URL may still appear as the preferred route
+in transport diagnostics, but it does not indicate a working HTTP relay.
 
 The MCP server discovers the Host RPC URL from
 `addons\godot_codex_bridge\host_config.json` when that file is present. Discovery
 is local-only: localhost targets are accepted, non-local hosts are ignored, and
 PowerShell-written UTF-8 BOM files are handled.
 
-Addon-backed request tools include transport evidence in their response. A
-successful Host RPC request returns `transport: "websocket_rpc"` and a
-`transport_attempts` entry with latency. If Host RPC is configured but
-unavailable, the response falls back to `transport: "file_polling"` and includes
-`fallback_reason` plus both the failed WebSocket RPC attempt and the file polling
-attempt. This keeps file polling visible as fallback/debug, not a silent primary
-route.
+Addon-backed request tools include transport evidence in their response. With
+the current Host, a configured HTTP attempt returns 503 and the response uses
+`transport: "file_polling"`, with `fallback_reason` and both attempts recorded.
 
 Agents should call this first. If the editor is stale or unavailable, addon
 request tools return structured `bridge_unavailable` instead of waiting for a
@@ -220,6 +209,24 @@ group, or a scene scan. It flags `floating`, `below_ground`, `clipping`,
 `off_grid` and `unmeasured` targets with measured gap/overlap/grid deltas and
 safe suggested follow-up actions. It does not move nodes, save scenes or apply
 fixes.
+
+### godot.undo_last_bridge_action
+
+Undoes the latest Godot Codex Bridge editor action from the current editor
+session, in the current scene's or the global (external resource) history. It
+runs the editor's own Undo so Godot's history stays consistent, and it never
+undoes a user action: it refuses with `newer_editor_action` when any edit, undo
+or redo happened afterward, `no_tracked_bridge_action` after a plugin reload or
+when nothing was tracked, `not_bridge_action`, `bridge_action_in_other_scene`,
+`editor_undo_unavailable`, `undo_mismatch` or `undo_failed`. Repeated calls walk
+back through consecutive Bridge actions. The scene is never saved.
+
+Node lifecycle tools follow the Scene dock's ownership rules: deleting or
+reparenting a node that belongs to an instanced sub-scene fails with
+`foreign_scene_node`, and creating, duplicating, instancing or reparenting under
+a parent inside an instance without Editable Children fails with
+`parent_not_editable`. Owners of all descendants survive delete/undo, reparent
+and duplicate, so children are kept on save.
 
 ### godot.snap_to_ground
 
@@ -501,7 +508,15 @@ state, not a file mutation.
 ### godot.stop_animation_preview
 
 Stops editor-side preview playback for an `AnimationPlayer`. This is also gated
-by `Animation preview` and does not mutate disk files.
+by `Animation preview` and does not mutate disk files. Preview changes node
+properties outside UndoRedo, so stop restores the values recorded before the
+preview (up to 512 animated properties) unless `keepPose` is true. The response
+reports `changed`, `pose_restored`, `restored_property_count`,
+`restore_failed_count` and `restore_conflict_count`: a property edited during
+the preview (by the user or an UndoRedo action) is left as edited and counted
+as a conflict. In play mode user edits cannot be told apart from playback, so
+`conflict_detection` is `playback_unverifiable`; seek/pause report `exact`. Saving while a preview is still running saves the
+previewed pose, as in Godot's own animation editor.
 
 ### godot.create_animation_clip
 
@@ -682,12 +697,11 @@ not a completed approval design.
 
 ### godot.compare_visual_regression
 
-Compares a current local PNG screenshot with a baseline by image dimensions,
-byte size, SHA-256 and pixel diff when both images are matching-dimension,
-non-interlaced 8-bit PNGs. Pixel diff reports compared pixels, changed pixels,
-changed ratio, RGBA channel mean absolute error and max channel delta. If a PNG
-format is unsupported, the tool returns metadata comparison plus a structured
-pixel-diff unavailable reason.
+Temporarily disabled. Project confinement alone cannot prove that arbitrary PNGs
+under the artifact tree were captured by the Bridge with live screenshot
+permission. Calls fail closed with
+`trusted_visual_input_provenance_unavailable`. The bounded PNG parser remains
+covered by isolated tests for a future provenance-backed workflow.
 
 ### godot.generate_scene_from_prompt
 
@@ -707,9 +721,9 @@ If `apply=true` is passed, the tool rejects the request with
 live editor path, such as `godot.editor_get_state`, `godot.open_scene`,
 `godot.create_node`, `godot.create_node_resource`,
 `godot.set_node_transform`, `godot.set_node_properties`,
-`godot.editor_batch` and `godot.save_scene`. These are suggestions, not an
+`godot.editor_batch`. These are suggestions, not an
 automatic batch: the agent should still inspect permissions, live editor state
-and screenshots before saving.
+and screenshots. Save reviewed changes from the Godot editor UI.
 
 Feature tags are intentionally conservative. A vague prompt such as "make this
 feel more dramatic" returns editor/navigation/evidence planning steps without
@@ -721,21 +735,15 @@ call suggestions even when no geometry feature is detected.
 
 ### godot.save_scene
 
-Explicitly saves the currently edited scene through Godot `EditorInterface`.
-This requires the bridge `Save scenes` permission. After a successful save, the
-MCP server automatically runs a bounded `godot --headless --check-only --quit`
-project parse check and attaches `post_save_check` plus
-`post_save_check_passed` to the tool response. If Godot CLI is unavailable or
-the configured project root is invalid, the save response remains visible and
-the post-save check reports `not_run` / `invalid_request` instead of silently
-claiming validation.
+Temporarily disabled. Every call fails closed with
+`trusted_scene_save_approval_unavailable`. A standing permission toggle is not
+enough to bind a save to the exact dirty scene state, target and rollback
+evidence. Save reviewed changes from the Godot editor UI.
 
 ### godot.save_all_scenes
 
-Explicitly requests Godot to save all open scenes through `EditorInterface`.
-This requires the bridge `Save scenes` permission. V1 does not run one parse
-check per open scene; call `godot.save_scene` for the current-scene
-save-and-check path when parse evidence is required.
+Temporarily disabled with the same fail-closed error. Re-enabling save-all
+requires one-use approval and rollback coverage for every exact dirty scene.
 
 ### godot.apply_approved_diff
 
@@ -747,13 +755,10 @@ approval receipts are implemented.
 
 ### godot.fix_selected_node
 
-Asks the live Godot addon to apply one narrow undoable fix to the currently
-selected node. It requires an active editor bridge, dock permission `Fix selected
-node`, and approval token `APPROVE_GODOT_CODEX_BRIDGE_FIX_SELECTED_NODE`.
-
-Supported fix codes: `unhide_node`, `make_camera_current`,
-`enable_collision_shape`, `enable_navigation_region`,
-`set_light_energy_default`, and `enable_light_shadows`.
+Temporarily disabled. The former public token was not a trusted human approval
+and has been removed. Use the Godot editor UI and UndoRedo directly until a
+short-lived, single-use receipt can bind the exact project, selected node,
+property, old value, and proposed value.
 
 ### godot.capture_viewport_screenshot
 
@@ -867,19 +872,18 @@ request is written.
 
 Stops the current Godot editor play session if one is active. This is a typed
 editor-control cleanup action for `godot.run_current_scene` workflows. It
-returns whether a scene was playing, whether a stop was requested, and cleanup
-evidence for Bridge-owned playtest input. On every stop it asks the playtest
-input model to release held actions and close the active playtest session token.
-The response includes `playtest_cleanup_ok`, `held_actions_released`,
-`session_closed`, `playtest_input_cleanup` and `playtest_session_cleanup`.
+returns `was_playing`, `playing_scene`, `stopped` and `requested_at`. Playtest
+input is disabled in this addon version, so there is no held input or playtest
+session token to release.
 
 It does not inspect the running game tree or gameplay state.
 
 ### godot.emergency_stop
 
-Emergency cleanup wrapper around the same typed stop path. It stops any
-Bridge-owned editor play session, releases held playtest input and closes the
-Bridge playtest session token. Use it when a live editor task is interrupted,
+Emergency cleanup wrapper around the same typed stop path. It stops the play
+session only when Godot Codex Bridge started it (`bridge_owned_play_session`);
+a play session the user started keeps running and the response says so. It
+never saves or mutates the edited scene. Use it when a live editor task is interrupted,
 times out or the agent needs to guarantee the runtime harness is idle before a
 new attempt.
 
@@ -888,56 +892,16 @@ only uses Godot editor APIs and Bridge-owned playtest session cleanup.
 
 ### godot.playtest_input
 
-Sends a bounded typed input batch to the bridge-owned running scene through the
-opt-in runtime probe. This is gated by the separate Godot dock permission
-`Playtest input`, which is off by default and is not enabled by ordinary Scene
-Edit, Save or Full Trust profiles.
-
-Supported steps are:
-
-- `action_press` / `action_release` for existing InputMap actions.
-- `axis` with `negativeAction` / `positiveAction` and a value from `-1` to `1`.
-- `key` for bounded key events.
-- `mouse_button` for bounded mouse button events.
-
-The addon writes a per-run playtest session token when it starts a scene through
-`godot.run_current_scene`; the runtime probe rejects input commands without the
-matching token. This keeps stale command files or manually started scenes from
-becoming an input backdoor. Every batch is capped, expires quickly, and held
-actions are released by `godot.stop_running_scene` or `godot.emergency_stop`.
-
-V1 limitation: this is not an OS-level clicker and does not drive Godot editor
-UI focus. It only delivers typed Godot input into the opt-in runtime probe inside
-the bridge-owned play session.
+Temporarily disabled. The addon does not currently expose a production
+`playtest_input` editor-control action, so MCP fails closed with
+`trusted_runtime_approval_unavailable` instead of advertising a permission gate
+that cannot be exercised and verified end to end.
 
 ### godot.run_playtest_scenario
 
-Runs a bounded declarative playtest through the live editor bridge. The tool
-uses file-polling transport so the addon can await the scenario asynchronously:
-run a project-local scene, send typed playtest input, wait for runtime events,
-capture runtime evidence metadata, refresh the final snapshot and stop the
-bridge-owned play session.
-
-MCP input currently supports `scenePath`, `timeoutMs` and ordered steps:
-
-- `press_action` with an existing InputMap action and optional `strength`.
-- `release_action` with an existing InputMap action.
-- `wait_seconds` bounded to 10 seconds per step.
-- `wait_for_event` for runtime probe events, optionally matching `action`.
-- `capture` for local `runtime_state`, `runtime_events`, `fixture_diagnostics`,
-  `viewport_screenshot` or `timeline_screenshot` evidence metadata. Timeline
-  captures accept `frameCount` / `frame_count` from 2-12 and `intervalMs` /
-  `interval_ms` from 50-5000 ms; scenario reports include per-frame local PNG
-  artifact refs.
-- `assert` for observed probe-only checks:
-  `runtime_event_present`, `runtime_scene_changed`,
-  `runtime_state_active_scene`, `runtime_state_node_exists`,
-  `runtime_state_position_delta` and `runtime_state_rotation_delta`.
-
-Delta assertions require captured runtime state snapshots in the same scenario
-and compare bounded observed probe data with explicit `axis`, `minDelta`,
-`maxDelta` and `epsilon` tolerances. They do not call arbitrary game methods or
-inspect script internals.
+Temporarily disabled with the same fail-closed error. Re-enabling it requires a
+default-off addon action that binds the exact project, scene, bounded steps and
+Bridge-owned runtime session to live authorization and cleanup evidence.
 
 Safety model: it requires both `Run current scene` and `Playtest input`
 permissions, writes no scene files, executes no arbitrary scripts, only targets
@@ -975,18 +939,10 @@ result.
 
 ### godot.run_test_scene
 
-Runs a configured project-relative test scene through the known Godot executable.
-It must not accept arbitrary shell text.
-
-The `runtime_summary` includes bounded signal fields for quick triage:
-
-- `error_count` / `warning_count`.
-- `error_samples` / `warning_samples`, each capped to a few matching
-  stdout/stderr lines with stream name, line number and truncated text.
-- `guidance`, a short next-step hint based on timeout, exit status and detected
-  Godot error/warning markers.
-
-Use the full `log_path` when the samples are insufficient.
+Temporarily disabled. Every call fails closed with
+`trusted_runtime_approval_unavailable`; project `.godot_bin` files are not
+executable authority. Use the permission-gated Godot editor run workflow until
+the MCP path can verify a live, default-off runtime authorization.
 
 ### godot.preview_scene_diff
 

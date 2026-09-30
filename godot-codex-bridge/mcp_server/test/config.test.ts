@@ -29,7 +29,7 @@ test("discoverGodotExecutable prioritizes GODOT_BIN environment variable", () =>
   }
 });
 
-test("discoverGodotExecutable reads .godot_bin from projectRoot if present", async () => {
+test("discoverGodotExecutable ignores project-controlled .godot_bin", async () => {
   const original = process.env.GODOT_BIN;
   delete process.env.GODOT_BIN;
 
@@ -39,7 +39,7 @@ test("discoverGodotExecutable reads .godot_bin from projectRoot if present", asy
     await fs.writeFile(path.join(tempDir, ".godot_bin"), targetBin, "utf8");
 
     const result = discoverGodotExecutable(undefined, tempDir);
-    assert.equal(result, path.resolve(targetBin));
+    assert.notEqual(result, path.resolve(targetBin));
   } finally {
     if (original !== undefined) {
       process.env.GODOT_BIN = original;
@@ -60,6 +60,17 @@ test("findGodotOnPath locates executable in custom PATH string", async () => {
   assert.equal(result, binaryPath);
 });
 
+test("findGodotOnPath ignores relative and attached-project candidates", async () => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "gcb-project-path-test-"));
+  const projectBin = path.join(projectRoot, "bin");
+  await fs.mkdir(projectBin, { recursive: true });
+  const binaryName = process.platform === "win32" ? "godot.exe" : "godot";
+  await fs.writeFile(path.join(projectBin, binaryName), "", "utf8");
+  const delimiter = process.platform === "win32" ? ";" : ":";
+
+  assert.equal(findGodotOnPath(`.${delimiter}${projectBin}`, projectRoot), null);
+});
+
 test("createServerConfig sets godotExecutable via discoverGodotExecutable", () => {
   const original = process.env.GODOT_BIN;
   const custom = path.resolve("/test/bin/godot_custom");
@@ -74,5 +85,27 @@ test("createServerConfig sets godotExecutable via discoverGodotExecutable", () =
     } else {
       process.env.GODOT_BIN = original;
     }
+  }
+});
+
+test("explicit project and bridge CLI paths override inherited environment", () => {
+  const originalArgv = process.argv;
+  const originalProject = process.env.GODOT_CODEX_BRIDGE_PROJECT_ROOT;
+  const originalBridge = process.env.GODOT_CODEX_BRIDGE_DIR;
+  const project = path.resolve("/chosen-godot-project");
+  const bridge = path.join(project, ".godot", "godot_codex_bridge");
+  try {
+    process.env.GODOT_CODEX_BRIDGE_PROJECT_ROOT = path.resolve("/wrong-project");
+    process.env.GODOT_CODEX_BRIDGE_DIR = path.resolve("/wrong-bridge");
+    process.argv = [originalArgv[0]!, originalArgv[1]!, "--project-root", project, "--bridge-dir", bridge];
+    const config = createServerConfig();
+    assert.equal(config.projectRoot, project);
+    assert.equal(config.bridgeDir, bridge);
+  } finally {
+    process.argv = originalArgv;
+    if (originalProject === undefined) delete process.env.GODOT_CODEX_BRIDGE_PROJECT_ROOT;
+    else process.env.GODOT_CODEX_BRIDGE_PROJECT_ROOT = originalProject;
+    if (originalBridge === undefined) delete process.env.GODOT_CODEX_BRIDGE_DIR;
+    else process.env.GODOT_CODEX_BRIDGE_DIR = originalBridge;
   }
 });

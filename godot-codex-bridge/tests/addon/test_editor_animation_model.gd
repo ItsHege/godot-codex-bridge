@@ -37,6 +37,27 @@ func _run() -> void:
 	_assert_false(bool(denied_create.get("ok", true)), "create animation denied when scene edit permission disabled")
 	_assert_eq(((denied_create.get("error", {}) as Dictionary).get("code")), "permission_denied", "scene edit permission error")
 
+	# Preview pose backup resolves what each track writes.
+	var root := Node3D.new()
+	var mover := Node3D.new()
+	mover.name = "Mover"
+	root.add_child(mover)
+	var mesh := MeshInstance3D.new()
+	mesh.name = "Mesh"
+	mesh.material_override = StandardMaterial3D.new()
+	root.add_child(mesh)
+	var position_target := EditorAnimation.preview_track_target(root, Animation.TYPE_POSITION_3D, NodePath("Mover"))
+	_assert_eq([position_target.get("object"), position_target.get("property")], [mover, "position"], "position track target")
+	var rotation_target := EditorAnimation.preview_track_target(root, Animation.TYPE_ROTATION_3D, NodePath("Mover"))
+	_assert_eq(rotation_target.get("property"), "quaternion", "rotation track target")
+	var value_target := EditorAnimation.preview_track_target(root, Animation.TYPE_VALUE, NodePath("Mover:position:x"))
+	_assert_eq([value_target.get("object"), value_target.get("property")], [mover, "position"], "sub-property value track backs up base property")
+	var resource_target := EditorAnimation.preview_track_target(root, Animation.TYPE_VALUE, NodePath("Mesh:material_override:albedo_color"))
+	_assert_eq([resource_target.get("object"), resource_target.get("property")], [mesh.material_override, "albedo_color"], "resource value track target")
+	_assert_eq(EditorAnimation.preview_track_target(root, Animation.TYPE_METHOD, NodePath("Mover")), {}, "method tracks skipped")
+	_assert_eq(EditorAnimation.preview_track_target(root, Animation.TYPE_VALUE, NodePath("Missing:position")), {}, "missing node skipped")
+	root.free()
+
 
 func _assert_eq(actual: Variant, expected: Variant, label: String) -> void:
 	if actual != expected:

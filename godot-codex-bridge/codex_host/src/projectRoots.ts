@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { assertPhysicalPathSync, ensureDirectoryInsideRootSync, PhysicalPathError, readFileInsideRootSync } from "./physicalPath.js";
 import type { ProjectSummary } from "./types.js";
 
 const SKIP_DIRS = new Set([".git", ".godot", ".import", "node_modules", "dist"]);
@@ -12,12 +13,15 @@ export async function resolveProject(projectRootInput: string, bridgeDirInput?: 
   if (!stat?.isFile()) {
     throw new Error(`wrong_root: project.godot not found at ${projectFile}`);
   }
+	assertPhysicalPathSync(projectRoot, projectFile);
 
-  const bridgeDir = bridgeDirInput
+	const bridgeDir = bridgeDirInput
     ? assertInside(projectRoot, path.resolve(bridgeDirInput), "bridge_dir")
     : path.join(projectRoot, ".godot", "godot_codex_bridge");
+	ensureDirectoryInsideRootSync(projectRoot, bridgeDir);
   const hostStateDir = path.join(bridgeDir, "codex_host");
-  await fs.mkdir(hostStateDir, { recursive: true });
+	ensureDirectoryInsideRootSync(projectRoot, hostStateDir);
+	assertPhysicalPathSync(projectRoot, hostStateDir);
 
   return {
     projectRoot,
@@ -42,7 +46,17 @@ async function findAgentsFiles(projectRoot: string): Promise<ProjectSummary["age
     if (path.basename(filePath).toLowerCase() !== "agents.md") {
       return;
     }
-    const buffer = await fs.readFile(filePath);
+    let buffer: Buffer;
+    try {
+      buffer = readFileInsideRootSync(projectRoot, filePath);
+    } catch (error) {
+      // One hard-linked AGENTS.md must not block attaching the whole project;
+      // it is simply not used as project guidance.
+      if (error instanceof PhysicalPathError && error.code === "hardlink_rejected") {
+        return;
+      }
+      throw error;
+    }
     found.push({
       path: filePath,
       sha256: crypto.createHash("sha256").update(buffer).digest("hex"),

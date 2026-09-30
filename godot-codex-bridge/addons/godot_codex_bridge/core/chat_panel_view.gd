@@ -10,6 +10,8 @@ const INPUT_AUTO_HEIGHT := 88.0
 const INPUT_EXPANDED_HEIGHT := 220.0
 const INPUT_CONTROLS_HEIGHT := 34.0
 const LOG_FRAME_MIN_HEIGHT := 48.0
+const JUMP_LATEST_RIGHT_MARGIN := 22.0
+const JUMP_LATEST_BOTTOM_MARGIN := 8.0
 
 
 static func create_panel() -> VBoxContainer:
@@ -33,10 +35,12 @@ static func create_panel_controls(status_color: Color) -> Dictionary:
 	advanced_panel.add_child(meta_controls.get("row") as HBoxContainer)
 
 	var working_label := create_working_label()
-	panel.add_child(working_label)
 
 	var toolbar_controls := create_toolbar_controls()
-	panel.add_child(toolbar_controls.get("row") as HBoxContainer)
+	var toolbar_row := toolbar_controls.get("row") as HBoxContainer
+	toolbar_row.add_child(working_label)
+	toolbar_row.move_child(working_label, 0)
+	panel.add_child(toolbar_row)
 	advanced_panel.add_child(toolbar_controls.get("advanced_row") as HBoxContainer)
 
 	var runtime_controls := create_runtime_controls()
@@ -140,6 +144,8 @@ static func control_refs(panel_controls: Dictionary) -> Dictionary:
 		"approval_title": approval_controls.get("title"),
 		"approval_body": approval_controls.get("body"),
 		"approval_note": approval_controls.get("note"),
+		"approval_review_button": approval_controls.get("review_button"),
+		"allow_session_button": approval_controls.get("allow_session_button"),
 		"approve_button": approval_controls.get("approve_button"),
 		"approve_session_button": approval_controls.get("approve_session_button"),
 		"reject_button": approval_controls.get("reject_button"),
@@ -242,12 +248,12 @@ static func create_toolbar_controls() -> Dictionary:
 	var advanced_row := HBoxContainer.new()
 	advanced_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
+	row.add_theme_constant_override("separation", 6)
 	var cancel_button := create_button(
 		"Stop",
 		"Interrupt the active foreground Codex turn."
 	)
-	cancel_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cancel_button.clip_text = true
+	cancel_button.size_flags_horizontal = Control.SIZE_SHRINK_END
 	row.add_child(cancel_button)
 
 	var emergency_stop_button := create_button(
@@ -437,6 +443,8 @@ static func create_clip_label(text: String = "", expand: bool = true, min_width:
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	if expand:
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	else:
@@ -461,7 +469,12 @@ static func apply_button_state(button: Button, state: Dictionary) -> void:
 		return
 	button.disabled = bool(state.get("disabled", button.disabled))
 	if state.has("text"):
-		button.text = str(state.get("text", button.text))
+		if bool(button.get_meta("dock_icon_only", false)):
+			# Icon-only buttons keep the label in the tooltip.
+			if not state.has("tooltip"):
+				button.tooltip_text = str(state.get("text", ""))
+		else:
+			button.text = str(state.get("text", button.text))
 	if state.has("tooltip"):
 		button.tooltip_text = str(state.get("tooltip", button.tooltip_text))
 	if state.has("visible"):
@@ -541,7 +554,13 @@ static func apply_composer_height(row: Control, input: TextEdit, toggle_button: 
 		input.custom_minimum_size = Vector2(0, height)
 		input.update_minimum_size()
 	if toggle_button != null:
-		toggle_button.text = "Collapse" if expanded else "Expand"
+		if bool(toggle_button.get_meta("dock_icon_only", false)):
+			toggle_button.set_meta("dock_label", "Collapse" if expanded else "Expand")
+			var icon_key := "dock_icon_collapse" if expanded else "dock_icon_expand"
+			if toggle_button.has_meta(icon_key) and toggle_button.get_meta(icon_key) is Texture2D:
+				toggle_button.icon = toggle_button.get_meta(icon_key) as Texture2D
+		else:
+			toggle_button.text = "Collapse" if expanded else "Expand"
 		toggle_button.tooltip_text = "Shrink the Codex prompt box." if expanded else "Make the Codex prompt box taller for longer instructions. Shift+Enter adds a new line."
 		toggle_button.update_minimum_size()
 
@@ -593,23 +612,27 @@ static func create_log_controls() -> Dictionary:
 
 	var message_list := VBoxContainer.new()
 	message_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	message_list.add_theme_constant_override("separation", 8)
+	message_list.add_theme_constant_override("separation", 4)
 	scroll.add_child(message_list)
 
 	var bottom_spacer := Control.new()
 	bottom_spacer.custom_minimum_size = Vector2(0, 8)
 	message_list.add_child(bottom_spacer)
 
-	var jump_latest_button := create_button("Jump to latest", "Resume following the newest conversation update.", 112)
+	var jump_latest_button := create_button("Jump to latest", "Resume following the newest conversation update.")
 	jump_latest_button.visible = false
+	# Anchored bottom-right, growing left/up from a margin that clears the
+	# vertical scrollbar, so the label is never clipped at the dock edge.
 	jump_latest_button.anchor_left = 1.0
 	jump_latest_button.anchor_top = 1.0
 	jump_latest_button.anchor_right = 1.0
 	jump_latest_button.anchor_bottom = 1.0
-	jump_latest_button.offset_left = -120.0
-	jump_latest_button.offset_top = -34.0
-	jump_latest_button.offset_right = -8.0
-	jump_latest_button.offset_bottom = -8.0
+	jump_latest_button.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	jump_latest_button.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	jump_latest_button.offset_left = -JUMP_LATEST_RIGHT_MARGIN
+	jump_latest_button.offset_top = -JUMP_LATEST_BOTTOM_MARGIN
+	jump_latest_button.offset_right = -JUMP_LATEST_RIGHT_MARGIN
+	jump_latest_button.offset_bottom = -JUMP_LATEST_BOTTOM_MARGIN
 	frame.add_child(jump_latest_button)
 
 	return {
@@ -627,47 +650,48 @@ static func create_approval_controls() -> Dictionary:
 	panel.size_flags_vertical = Control.SIZE_SHRINK_END
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	var title := Label.new()
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	title.text = "Approval required"
-	panel.add_child(title)
-
-	var body := TextEdit.new()
-	body.editable = false
-	body.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	body.custom_minimum_size = Vector2(0, 56)
-	panel.add_child(body)
-
-	var note := LineEdit.new()
-	note.placeholder_text = "Optional note for Codex"
-	panel.add_child(note)
-
 	var buttons := HBoxContainer.new()
 	buttons.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	buttons.add_theme_constant_override("separation", 4)
 	panel.add_child(buttons)
 
+	var title := create_clip_label("Approval needed")
+	buttons.add_child(title)
+
+	var review_button := create_button("Review", "Open the full approval review.")
+	buttons.add_child(review_button)
+
 	var approve_button := create_button("Approve")
-	approve_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	approve_button.clip_text = true
 	buttons.add_child(approve_button)
 
+	var allow_session_button := create_button("Allow session", "")
+	allow_session_button.visible = false
+	buttons.add_child(allow_session_button)
+
+	var reject_button := create_button("Reject")
+	buttons.add_child(reject_button)
+
+	# Kept for the popup-less fallback and existing references; hidden in the bar.
 	var approve_session_button := create_button(
 		"Approve Session",
 		"Approve this request and let Codex reuse this approval for the current app-server session where supported."
 	)
-	approve_session_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	approve_session_button.clip_text = true
+	approve_session_button.visible = false
 	buttons.add_child(approve_session_button)
 
-	var reject_button := create_button("Reject")
-	reject_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	reject_button.clip_text = true
-	buttons.add_child(reject_button)
-
 	var revise_button := create_button("Revise")
-	revise_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	revise_button.clip_text = true
+	revise_button.visible = false
 	buttons.add_child(revise_button)
+
+	var body := TextEdit.new()
+	body.editable = false
+	body.visible = false
+	panel.add_child(body)
+
+	var note := LineEdit.new()
+	note.placeholder_text = "Optional note for Codex"
+	note.visible = false
+	panel.add_child(note)
 
 	return {
 		"panel": panel,
@@ -675,6 +699,8 @@ static func create_approval_controls() -> Dictionary:
 		"body": body,
 		"note": note,
 		"buttons": buttons,
+		"review_button": review_button,
+		"allow_session_button": allow_session_button,
 		"approve_button": approve_button,
 		"approve_session_button": approve_session_button,
 		"reject_button": reject_button,

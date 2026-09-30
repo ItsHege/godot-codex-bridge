@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { loadConfig } from "./config.js";
 import { resolveCodexCommand } from "./codexCommand.js";
+import { compareSchemaTree, hashSchemaTree } from "./schemaTree.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,6 +109,7 @@ async function checkSchemaLock(root: string, codexCliVersion: string): Promise<F
   let lock: {
     codex_cli_version?: string;
     files?: Record<string, { sha256?: string; bytes?: number }>;
+    tree?: Record<string, string>;
   };
   try {
     lock = JSON.parse(text) as typeof lock;
@@ -150,5 +152,30 @@ async function checkSchemaLock(root: string, codexCliVersion: string): Promise<F
     });
   }
 
+  findings.push(await checkSchemaTree(path.join(root, "schemas"), lock.tree));
   return findings;
+}
+
+async function checkSchemaTree(schemasDir: string, expected: Record<string, string> | undefined): Promise<Finding> {
+  if (!expected || Object.keys(expected).length === 0) {
+    return {
+      id: "schema_lock:tree",
+      status: "error",
+      message: "lock has no full generated-tree hashes; run npm run generate:schemas"
+    };
+  }
+  const drift = compareSchemaTree(expected, await hashSchemaTree(schemasDir));
+  const total = drift.changed.length + drift.added.length + drift.removed.length;
+  return {
+    id: "schema_lock:tree",
+    status: total === 0 ? "ok" : "error",
+    message: total === 0
+      ? `all ${Object.keys(expected).length} generated schema files match`
+      : `generated schema tree drift: ${drift.changed.length} changed, ${drift.added.length} added, ${drift.removed.length} removed`,
+    data: total === 0 ? undefined : {
+      changed: drift.changed.slice(0, 10),
+      added: drift.added.slice(0, 10),
+      removed: drift.removed.slice(0, 10)
+    }
+  };
 }

@@ -32,5 +32,6 @@ export interface AddonRequest extends JsonObject {
   request_id: string;
   type: string;
   created_at: string;
+  deadline_at: string;
   payload: JsonObject;
 }

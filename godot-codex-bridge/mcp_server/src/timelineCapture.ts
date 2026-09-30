@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
 
 import { BridgeClient, isJsonObject } from "./bridge.js";
+import { ensureDirectoryInsideRootSync, writeFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject, ServerConfig, ToolEnvelope, ToolStatus } from "./types.js";
-import { compareVisualRegression } from "./visualRegression.js";
 
 const TIMELINE_CAPTURE_VERSION = "godot-codex-bridge/timeline-capture-v1";
 
@@ -64,7 +63,7 @@ export async function captureTimelineScreenshots(
   const captureStatus = succeededFrames === frameCount ? "completed" : succeededFrames > 0 ? "partial" : "failed";
   const manifestStatus: ToolStatus = captureStatus === "failed" ? failureStatus ?? "error" : "ok";
   const artifactRoot = path.join(config.bridgeDir, "artifacts", "timeline_captures", captureId);
-  await fs.mkdir(artifactRoot, { recursive: true });
+  ensureDirectoryInsideRootSync(config.projectRoot, artifactRoot);
 
   const manifest: ToolEnvelope = {
     status: manifestStatus,
@@ -97,91 +96,27 @@ export async function captureTimelineScreenshots(
     manifest.error = failureError;
   }
   if (options.baselineName || options.baselinePath) {
-    manifest.baseline_comparison = await compareFramesToBaseline(config.bridgeDir, frames, {
-      baselineName: options.baselineName,
-      baselinePath: options.baselinePath,
-    });
+    manifest.baseline_comparison = disabledBaselineComparison(options.baselineName, options.baselinePath, frames.length);
   }
 
   const manifestPath = path.join(artifactRoot, "timeline.json");
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeFileInsideRootSync(config.projectRoot, manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return {
     ...manifest,
     manifest_path: manifestPath,
   };
 }
 
-async function compareFramesToBaseline(
-  bridgeDir: string,
-  frames: JsonObject[],
-  options: { baselineName?: string; baselinePath?: string },
-): Promise<JsonObject> {
-  const comparisons: JsonObject[] = [];
-  for (const frame of frames) {
-    if (frame.status !== "ok") {
-      continue;
-    }
-    const screenshotPath = screenshotPathFromFrame(frame);
-    if (!screenshotPath) {
-      comparisons.push({
-        frame_index: frame.index,
-        frame_ordinal: frame.ordinal,
-        status: "invalid_request",
-        error: {
-          code: "timeline_frame_screenshot_path_missing",
-          message: "Timeline frame does not include a local screenshot PNG path for baseline comparison.",
-        },
-      });
-      continue;
-    }
-    const comparison = await compareVisualRegression(bridgeDir, {
-      currentScreenshotPath: screenshotPath,
-      baselineName: options.baselineName,
-      baselinePath: options.baselinePath,
-    });
-    comparisons.push({
-      frame_index: frame.index,
-      frame_ordinal: frame.ordinal,
-      current_screenshot_path: screenshotPath,
-      ...comparison,
-    });
-  }
-
-  const compared = comparisons.filter((item) => item.status === "ok");
-  const exactMatches = compared.filter((item) => item.exact_match === true).length;
+function disabledBaselineComparison(baselineName: string | undefined, baselinePath: string | undefined, frameCount: number): JsonObject {
   return {
-    status: comparisons.length === 0
-      ? "not_found"
-      : comparisons.some((item) => item.status !== "ok")
-        ? "partial"
-        : "ok",
-    baseline_name: options.baselineName,
-    baseline_path: options.baselinePath,
-    frame_count_considered: frames.length,
-    frame_count_compared: compared.length,
-    frame_count_with_errors: comparisons.length - compared.length,
-    exact_match_count: exactMatches,
-    changed_frame_count: compared.length - exactMatches,
-    comparisons,
+    status: "disabled",
+    baseline_name: baselineName,
+    baseline_path: baselinePath,
+    frame_count_considered: frameCount,
+    frame_count_compared: 0,
+    mitigation: "trusted_visual_input_provenance_unavailable",
+    message: "Visual comparison is disabled until both inputs have Bridge-owned provenance and live screenshot permission can be verified.",
   };
-}
-
-function screenshotPathFromFrame(frame: JsonObject): string {
-  const artifact = objectOrUndefined(frame.artifact);
-  const screenshot = objectOrUndefined(frame.screenshot);
-  const screenshotArtifact = objectOrUndefined(screenshot?.artifact);
-  for (const candidate of [
-    artifact?.local_path,
-    artifact?.absolute_path,
-    screenshotArtifact?.local_path,
-    screenshotArtifact?.absolute_path,
-    screenshot?.local_path,
-  ]) {
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate;
-    }
-  }
-  return "";
 }
 
 function frameFromEnvelope(

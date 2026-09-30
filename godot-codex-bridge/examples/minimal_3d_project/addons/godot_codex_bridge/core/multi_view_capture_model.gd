@@ -308,6 +308,10 @@ func _capture_view(scene_root: Node3D, targets: Array, bounds: AABB, view: Strin
 		if _context == null or not _context.permission_enabled("allow_screenshots"):
 			subviewport.queue_free()
 			return {"view": view, "status": "error", "error": _error_payload("permission_denied", "Screenshot capture permission was revoked before the artifact was written.")}
+		var path_guard := _context.validate_path(abs_path, true)
+		if not bool(path_guard.get("ok", false)):
+			subviewport.queue_free()
+			return {"view": view, "status": "error", "error": path_guard.get("error", _error_payload("multi_view_path_rejected", "Multi-view artifact path is unsafe."))}
 		var err := image.save_png(abs_path)
 		if err != OK:
 			frame = {
@@ -409,6 +413,10 @@ func _capture_view_async(scene_root: Node3D, targets: Array, bounds: AABB, view:
 		if _context == null or not _context.permission_enabled("allow_screenshots"):
 			subviewport.queue_free()
 			return {"view": view, "status": "error", "error": _error_payload("permission_denied", "Screenshot capture permission was revoked before the artifact was written.")}
+		var path_guard := _context.validate_path(abs_path, true)
+		if not bool(path_guard.get("ok", false)):
+			subviewport.queue_free()
+			return {"view": view, "status": "error", "error": path_guard.get("error", _error_payload("multi_view_path_rejected", "Multi-view artifact path is unsafe."))}
 		var err := image.save_png(abs_path)
 		if err != OK:
 			frame = {
@@ -787,7 +795,10 @@ func _ensure_artifact_dir(path: String) -> Dictionary:
 	if path == "":
 		return _err("bridge_dir_unavailable", "Bridge artifact directory is unavailable.")
 	if _context != null:
-		_context.ensure_dirs()
+		var safe_result := _context.ensure_safe_dir(path)
+		if not bool(safe_result.get("ok", false)):
+			return safe_result
+		return _ok({"path": path})
 	var err := DirAccess.make_dir_recursive_absolute(path)
 	if err != OK:
 		return _err("multi_view_artifact_dir_failed", "Failed to create multi-view artifact directory: " + error_string(err))
