@@ -146,7 +146,9 @@ test("an update blocked by a reopened editor does not open a second editor", asy
   const f = await fixture();
   const active = { code: 1, stdout: "", stderr: "Refusing automatic GC-work update while the Godot editor is active: X" };
   const h = harness({ updateResults: Array.from({ length: 50 }, () => active) });
-  const updater = new AddonUpdater({ productRoot: f.productRoot, ...h.options, activeEditorRetryMs: 0 });
+  // A retry window already in the past: the first "editor active" answer is final,
+  // however fast the machine runs the retry loop.
+  const updater = new AddonUpdater({ productRoot: f.productRoot, ...h.options, activeEditorRetryMs: -1 });
   await updater.schedule(f.projectRoot, f.bridgeDir, { build_id: AVAILABLE, editor_pid: 4242, godot_executable: f.godot });
   await updater.running;
   const result = JSON.parse(await fs.readFile(path.join(f.bridgeDir, "addon_update_result.json"), "utf8"));
