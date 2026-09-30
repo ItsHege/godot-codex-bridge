@@ -2744,7 +2744,12 @@ async function waitForEditorControlAction(requestsDir: string, action: string, p
 
 async function writeAddonResponse(bridgeDir: string, requestId: string, response: Record<string, unknown>): Promise<void> {
   await fs.mkdir(path.join(bridgeDir, "responses"), { recursive: true });
-  await fs.writeFile(path.join(bridgeDir, "responses", `${requestId}.json`), JSON.stringify({ ...response, request_id: requestId }), "utf8");
+  // Publish atomically like the addon (FILE_TRANSPORT_V2): the client polls for
+  // this file and must never see it half-written on a slow runner.
+  const target = path.join(bridgeDir, "responses", `${requestId}.json`);
+  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify({ ...response, request_id: requestId }), "utf8");
+  await fs.rename(temporary, target);
 }
 
 async function writeLiveHeartbeat(bridgeDir: string): Promise<void> {
