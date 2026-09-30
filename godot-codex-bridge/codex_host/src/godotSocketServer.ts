@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
 import { fail, ok, parseMessage } from "./jsonRpc.js";
+import { projectIdentityHash } from "./projectIdentity.js";
 import type { HostController } from "./hostController.js";
 import type { HostEvent, JsonRpcRequest } from "./types.js";
 
@@ -66,6 +67,7 @@ export class GodotSocketServer {
             ok: true,
             runtime: this.controller.status().runtime,
             port: this.addressPort(),
+            ...this.projectIdentity(),
             ...(this.launchNonce ? { launch_proof: createHmac("sha256", Buffer.from(this.launchNonce, "hex")).update("godot-codex-bridge-host-health-v1").digest("hex") } : {})
           }));
           return;
@@ -157,6 +159,18 @@ export class GodotSocketServer {
       return this.port;
     }
     return address.port;
+  }
+
+  /** Hashes only: enough for the MCP server to detect a mismatch, not to learn the path. */
+  private projectIdentity(): Record<string, unknown> {
+    const project = this.controller.status().activeProject;
+    if (!project) return {};
+    return {
+      project_identity: {
+        project_root_sha256: projectIdentityHash(project.projectRoot),
+        bridge_dir_sha256: projectIdentityHash(project.bridgeDir)
+      }
+    };
   }
 
   private isAllowedRequest(request: IncomingMessage): boolean {

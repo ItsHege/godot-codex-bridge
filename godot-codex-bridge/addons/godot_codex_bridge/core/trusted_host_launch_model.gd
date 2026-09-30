@@ -56,13 +56,18 @@ static func validate_record(record: Dictionary, project_root_abs: String, check_
 		return _invalid("unreadable", "The trusted Host record could not be read.")
 	if str(record.get("schema_version", "")) != SCHEMA_VERSION:
 		return _invalid("schema", "The trusted Host record has an unsupported schema.")
-	var paths := {}
-	for key in ["install_root", "start_script", "powershell_executable", "node_executable", "codex_executable"]:
+	var runtime := str(record.get("runtime", ""))
+	if not (runtime in ["app-server", "mock"]):
+		return _invalid("runtime", "The trusted Host record has an unsupported runtime.")
+	# The mock runtime never launches Codex, so its record has no Codex executable.
+	var executable_keys := ["powershell_executable", "node_executable", "codex_executable"] if runtime == "app-server" else ["powershell_executable", "node_executable"]
+	var paths := {"codex_executable": ""}
+	for key in ["install_root", "start_script"] + executable_keys:
 		var value := str(record.get(key, "")).strip_edges()
 		if not is_local_absolute_path(value):
 			return _invalid("path", "The trusted Host record field " + key + " is not a local absolute path.")
 		paths[key] = value
-	for key in ["powershell_executable", "node_executable", "codex_executable"]:
+	for key in executable_keys:
 		if not str(paths[key]).to_lower().ends_with(".exe"):
 			return _invalid("executable", "The trusted Host record field " + key + " is not an .exe.")
 	if not (str(paths["powershell_executable"]).get_file().to_lower() in POWERSHELL_NAMES):
@@ -74,9 +79,10 @@ static func validate_record(record: Dictionary, project_root_abs: String, check_
 	var project := comparable_path(project_root_abs)
 	if project != "" and (install_root == project or install_root.begins_with(project + "/")):
 		return _invalid("inside_project", "The trusted Host install is inside this project, so the project could change what runs. Trust an install outside the project.")
-	var runtime := str(record.get("runtime", ""))
-	if not (runtime in ["app-server", "mock"]):
-		return _invalid("runtime", "The trusted Host record has an unsupported runtime.")
+	# The launcher also refuses a project inside the install; say so now instead
+	# of failing later during the launch.
+	if project != "" and project.begins_with(install_root + "/"):
+		return _invalid("project_inside_install", "This project is inside the trusted Host install. Open a project stored outside it to use one-click Connect.")
 	var port_value: Variant = record.get("port")
 	if not (typeof(port_value) == TYPE_INT or typeof(port_value) == TYPE_FLOAT) or float(port_value) != floorf(float(port_value)) or int(port_value) < 1 or int(port_value) > 65535:
 		return _invalid("port", "The trusted Host record has an invalid port.")
@@ -89,7 +95,7 @@ static func validate_record(record: Dictionary, project_root_abs: String, check_
 	if check_files:
 		if not DirAccess.dir_exists_absolute(paths["install_root"]):
 			return _invalid("files_missing", "The trusted Host install folder no longer exists: " + str(paths["install_root"]))
-		for key in ["start_script", "powershell_executable", "node_executable", "codex_executable"]:
+		for key in ["start_script"] + executable_keys:
 			if not FileAccess.file_exists(paths[key]):
 				return _invalid("files_missing", "A trusted Host file no longer exists: " + str(paths[key]))
 	var normalized := paths.duplicate()
@@ -117,18 +123,28 @@ static func script_changed_message() -> String:
 ## Arguments for PowerShell `-File start_codex_host.ps1 -Start` as an owned,
 ## non-interactive launch for this editor process.
 static func launch_args(record: Dictionary, project_root_abs: String, owner_pid: int) -> PackedStringArray:
-	return PackedStringArray([
+	var args := PackedStringArray([
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
 		"-File", str(record.get("start_script", "")),
 		"-ProjectRoot", windows_path(project_root_abs.trim_suffix("/").trim_suffix("\\")),
 		"-NodeExecutable", str(record.get("node_executable", "")),
-		"-CodexExecutable", str(record.get("codex_executable", "")),
+	])
+	args.append_array(_codex_args(record))
+	args.append_array(PackedStringArray([
 		"-ExpectedFingerprint", str(record.get("fingerprint", "")),
 		"-Port", str(int(record.get("port", 0))),
 		"-Runtime", str(record.get("runtime", "")),
 		"-OwnerProcessId", str(owner_pid),
 		"-Start",
-	])
+	]))
+	return args
+
+
+## An empty argument value can be dropped on the way to PowerShell, shifting the
+## following flags, so the mock runtime passes no Codex argument at all.
+static func _codex_args(record: Dictionary) -> PackedStringArray:
+	var codex := str(record.get("codex_executable", ""))
+	return PackedStringArray(["-CodexExecutable", codex]) if codex != "" else PackedStringArray()
 
 
 ## Arguments for re-trusting the same installation after the user confirmed
@@ -139,7 +155,7 @@ static func trust_args(record: Dictionary, expected_fingerprint: String) -> Pack
 		"-File", str(record.get("start_script", "")),
 		"-Trust",
 		"-NodeExecutable", str(record.get("node_executable", "")),
-		"-CodexExecutable", str(record.get("codex_executable", "")),
+	] + Array(_codex_args(record)) + [
 		"-ExpectedFingerprint", expected_fingerprint,
 		"-Port", str(int(record.get("port", 0))),
 		"-Runtime", str(record.get("runtime", "")),

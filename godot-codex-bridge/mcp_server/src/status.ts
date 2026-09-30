@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { assertPhysicalPathSync, readFileInsideRootSync } from "./physicalPath.js";
 import type { JsonObject, JsonValue, ServerConfig, ToolEnvelope } from "./types.js";
+import { projectIdentityHash } from "./projectIdentity.js";
 
 export const HEARTBEAT_STALE_MS = 5_000;
 export const SNAPSHOT_STALE_MS = 60_000;
@@ -77,14 +78,23 @@ export async function getBridgeStatus(
   const snapshotSchemaCandidate = isJsonObject(snapshot);
   const hostProjectRoot = stringAt(hostHealth, ["activeProject", "projectRoot"]);
   const hostBridgeDir = stringAt(hostHealth, ["activeProject", "bridgeDir"]);
+  // Current Hosts publish only hashes of their attached project (the path is
+  // not exposed to unauthenticated callers); older Hosts published the paths.
+  const hostProjectHash = stringAt(hostHealth, ["project_identity", "project_root_sha256"]);
+  const hostBridgeDirHash = stringAt(hostHealth, ["project_identity", "bridge_dir_sha256"]);
   const projectIdentity = {
     editorProjectRoot: config.projectRoot,
     hostProjectRoot,
     editorBridgeDir: config.bridgeDir,
     hostBridgeDir,
     hostStatusAvailable: hostHealth !== undefined,
-    matches: hostProjectRoot === null ? null : samePath(config.projectRoot, hostProjectRoot),
-    bridgeDirMatches: hostBridgeDir === null ? null : samePath(config.bridgeDir, hostBridgeDir),
+    identitySource: hostProjectRoot !== null ? "path" : hostProjectHash !== null ? "hash" : null,
+    matches: hostProjectRoot !== null
+      ? samePath(config.projectRoot, hostProjectRoot)
+      : hostProjectHash !== null ? projectIdentityHash(config.projectRoot) === hostProjectHash : null,
+    bridgeDirMatches: hostBridgeDir !== null
+      ? samePath(config.bridgeDir, hostBridgeDir)
+      : hostBridgeDirHash !== null ? projectIdentityHash(config.bridgeDir) === hostBridgeDirHash : null,
   };
   const projectMismatch = projectIdentity.matches === false || projectIdentity.bridgeDirMatches === false;
 

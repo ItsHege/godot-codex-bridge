@@ -6,6 +6,7 @@ import { loadConfig } from "../src/config.js";
 import { MockCodexRuntime } from "../src/codexRuntime.js";
 import { GodotSocketServer } from "../src/godotSocketServer.js";
 import { HostController } from "../src/hostController.js";
+import { projectIdentityHash } from "../src/projectIdentity.js";
 
 const PAIR_SECRET = "c".repeat(64);
 
@@ -165,3 +166,22 @@ function nextMessage(client: Client): Promise<any> {
     client.waiters.push((value) => { clearTimeout(timeout); resolve(value); });
   });
 }
+
+test("health publishes only a hash of the attached project, and the hash matches the MCP algorithm", async () => {
+  const controller = new HostController(loadConfig(["--runtime", "mock"]), new MockCodexRuntime());
+  const server = new GodotSocketServer("127.0.0.1", 0, controller, "", PAIR_SECRET);
+  const projectRoot = await import("node:fs/promises").then((fs) => fs.mkdtemp(`${process.env.TEMP ?? "/tmp"}/gcb-health-identity-`));
+  await import("node:fs/promises").then((fs) => fs.writeFile(`${projectRoot}/project.godot`, "[application]\n"));
+  await controller.handleRequest({ jsonrpc: "2.0", id: 1, method: "project.attach", params: { project_root: projectRoot } });
+  await server.start();
+  try {
+    const health = await (await fetch(`http://127.0.0.1:${server.addressPort()}/health`)).json() as Record<string, any>;
+    assert.equal(health.activeProject, undefined, "no project path in unauthenticated health");
+    assert.equal(JSON.stringify(health).includes("gcb-health-identity"), false);
+    assert.equal(health.project_identity.project_root_sha256, projectIdentityHash(projectRoot));
+    assert.equal(projectIdentityHash("C:\\Games\\My Game\\", "win32"), projectIdentityHash("c:/games/my game", "win32"));
+  } finally {
+    await server.stop();
+    await controller.shutdown();
+  }
+});
