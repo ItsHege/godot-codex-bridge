@@ -27,7 +27,7 @@ Godot Codex Bridge connects AI coding agents directly to the active Godot 4 Edit
 
 - A **Model Context Protocol (MCP)** server providing **100+ typed `godot.*` tools** for scene introspection, diagnostics, live node manipulation, diff previews, and viewport screenshot capture.
 - A **Godot Editor Addon** running natively inside Godot to execute commands on the engine main thread via Godot's native `UndoRedo` system, export live context snapshots, capture viewport textures, and render an in-editor **Codex Chat** dock with interactive visual annotations (**"Eye Attach"**).
-- A local **Codex Host** relay daemon bridging in-editor chat with the OpenAI Codex `app-server` and providing high-speed WebSocket RPC for MCP tool execution.
+- A local **Codex Host** that the editor starts with one click. It pairs with the addon over a local WebSocket, runs the OpenAI Codex `app-server` for in-editor chat and approvals, and binds Codex's Bridge tools to the open project.
 
 ---
 
@@ -53,7 +53,7 @@ Godot Codex Bridge connects AI coding agents directly to the active Godot 4 Edit
 ```mermaid
 flowchart TD
     subgraph Agents ["AI Coding Agents"]
-        Codex["OpenAI Codex CLI"]
+        Codex["OpenAI Codex (CLI or in-editor chat)"]
         Claude["Claude Desktop"]
         Cursor["Cursor / Windsurf"]
     end
@@ -61,17 +61,17 @@ flowchart TD
     subgraph MCPLayer ["MCP Server (Node.js / TypeScript)"]
         MCPServer["godot-codex-bridge-mcp<br/>(100+ Typed Tools)"]
         ToolCatalog["Tool Catalog & Workflow Router"]
-        PathGuard["Path & Permission Guardrails"]
+        PathGuard["Path, Secret & Permission Guardrails"]
     end
 
-    subgraph HostLayer ["Codex Host (Local Daemon)"]
-        CodexHost["Local Codex Host<br/>(Port 49390)"]
-        AppServerBridge["OpenAI Codex app-server Bridge"]
+    subgraph HostLayer ["Codex Host (Local, started by Connect)"]
+        CodexHost["Local Codex Host<br/>(loopback, paired)"]
+        AppServer["OpenAI Codex app-server<br/>(Bridge tools bound to the open project)"]
     end
 
     subgraph GodotEditor ["Godot 4 Editor Session"]
         Addon["Godot Codex Bridge Addon<br/>(plugin.gd)"]
-        ChatDock["In-Editor Codex Chat & Eye Attach Dock"]
+        ChatDock["Codex Chat, Approvals & Eye Attach"]
         UndoRedo["Engine UndoRedo Stack"]
         SceneTree["SceneTree & EditorInterface"]
         Viewport["Editor Viewport & Cameras"]
@@ -81,7 +81,7 @@ flowchart TD
     subgraph LocalStorage ["Project Local Evidence (.godot/godot_codex_bridge/)"]
         Snapshot["context_snapshot.json"]
         Artifacts["Screenshots & Multi-View Evidence"]
-        FallbackDir["requests/ & responses/ (Fallback)"]
+        Transport["requests/ & responses/<br/>(atomic, exactly-once journal)"]
     end
 
     Codex -->|stdio MCP| MCPServer
@@ -90,14 +90,12 @@ flowchart TD
 
     MCPServer --> ToolCatalog
     MCPServer --> PathGuard
+    PathGuard -->|File transport| Transport
+    Transport <-->|Polling loop| Addon
 
-    PathGuard -->|Preferred: HTTP RPC| CodexHost
-    CodexHost -->|WebSocket| Addon
-    ChatDock <-->|WebSocket| CodexHost
-    CodexHost <--> AppServerBridge
-
-    PathGuard -.->|Fallback: File Polling| FallbackDir
-    FallbackDir <-.->|Polling Loop| Addon
+    ChatDock <-->|Paired WebSocket| CodexHost
+    CodexHost <--> AppServer
+    AppServer -->|launches, project-bound| MCPServer
 
     Addon --> Snapshot
     Addon --> Artifacts
@@ -344,10 +342,11 @@ godot-codex-bridge/
 │   ├── mcp_server/                # Model Context Protocol server (TypeScript)
 │   ├── codex_host/                # Local daemon for in-editor chat & RPC (TypeScript)
 │   ├── examples/                  # Minimal 3D test project & fixtures
-│   ├── contracts/                 # JSON schemas and samples for bridge payloads
+│   ├── contracts/                 # Bridge payload schemas, file transport, update and connect contracts
 │   ├── tests/                     # GDScript addon tests and snapshot validators
 │   ├── docs/                      # Architecture, install, quickstart, safety, and MCP tool docs
 │   └── scripts/                   # Install, packaging, and validation scripts
+├── plugins/godot-codex-bridge/    # Local Codex plugin that sets up the addon and project MCP config
 ├── package.json                   # Root npm workspace configuration
 ├── CONTRIBUTING.md                # Development setup, testing, and contribution rules
 ├── SECURITY.md                    # Vulnerability reporting and privilege boundaries
@@ -388,7 +387,8 @@ godot-codex-bridge/
 - **Editor Must Be Open for Live Tools:** Addon-backed tools (screenshots, live node selection, transform edits) require an active Godot Editor session. When Godot is closed, the bridge provides bounded offline project reading (`godot.get_scene_file_tree`, `godot.project_get_map`, `godot.read_project_file`).
 - **Modal Dialog Blocking:** When a native blocking file dialog or modal confirmation is active in Godot, the main engine thread freezes, pausing heartbeat updates until dismissed.
 - **Single Active Editor Session:** The bridge currently pairs one MCP server process with one target Godot project root.
-- **Addon Actions Not Yet Wired:** The MCP server registers tools for these editor actions, but the v0.1.0 addon does not handle them yet, so a live editor returns `unsupported_editor_action`: `get_inspector_context`, `viewport_navigate`, `get_spatial_bounds`, `spatial_query`, `placement_check`, `snap_to_ground`, `snap_to_grid`, `undo_last_bridge_action`, `emergency_stop`, `playtest_input`, and `run_playtest_scenario`.
+- **Playtest Input Disabled:** `godot.playtest_input` and `godot.run_playtest_scenario` fail closed until the addon exposes trusted live runtime authorization. `godot.editor_viewport_navigate` supports the 2D viewport only.
+- **One-Click Connect Is Windows-Only:** The trusted Host launcher and in-editor updates use PowerShell 7 on Windows. On other platforms, start the Host manually.
 - **Multi-View Renders Are Proxies:** Multi-view capture renders unshaded proxies of meshes and collision shapes in an isolated world, not the fully lit editor scene. If the GPU frame comes back blank, the manifest reports `render_source: software_geometry_fallback`.
 
 ---
